@@ -1,0 +1,33 @@
+NXP Software Content Register
+
+Package:                     tflite-ethosu-delegate.git
+Outgoing License:            Apache-2.0 
+License File:                LICENSE
+Type of Content:             source
+Description and comments:    tflite-ethosu-delegate is on tensorflow-lite external delegate for ethos-u NPU on iMX93 platform
+Release Location:            https://github.com/nxpmicro/tflite-ethosu-delegate-imx
+
+
+--------------------------------------------------
+Included ethos-u driver library file
+--------------------------------------------------
+Component:                   kernel_driver inteface header file
+Outgoing License:            Apache-2.0
+License File:                LICENSE
+Package Category:            Ethos-u Linux driver library
+Type of Content:             source and header file
+Description and comments:    Driver library header file and source file.
+Origin:                      ARM ethos-u-linux-driver-stack v22.02 (Apache-2.0) - https://git.mlplatform.org/ml/ethos-u/ethos-u-linux-driver-stack.git
+File location:               ethosu_drv.cc ethosu_drv.h
+
+----------------------------------------------------
+Included tensorflow-lite simple delegate API source
+----------------------------------------------------
+Component:                   tensorflow-lite simple delegate API
+Outgoing License:            Apache-2.0
+License File:                LICENSE
+Package Category:            tensorflow-lite simple delegate API source and header file
+Type of Content:             source and header file
+Description and comments:    A TensorFlow Lite Delegate allows you to run your models (part or whole) on another executor.
+Origin:                      tensorflow v2.10.0 (Apache-2.0) - https://github.com/tensorflow/tensorflow
+File location:               simple_delegate.cc simple_delegate.h

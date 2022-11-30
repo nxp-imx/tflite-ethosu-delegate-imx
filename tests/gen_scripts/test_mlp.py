@@ -1,0 +1,76 @@
+#
+# Copyright 2020-2022 NXP
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the License); you may
+# not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an AS IS BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+import os
+import tensorflow as tf
+from tensorflow import keras
+import numpy as np
+
+def generate_model(path):
+    # Download MNIST dataset.
+    mnist = keras.datasets.mnist
+    (train_images, train_labels), (test_images, test_labels) = mnist.load_data()
+
+    images = tf.cast(train_images[0], tf.float32)/255.0
+    #mnist_ds = tf.data.Dataset.from_tensor_slices((images)).batch(1)
+    mnist_ds = tf.data.Dataset.from_tensors((images)).batch(1)
+
+    def representative_dataset():
+      for input_value in mnist_ds.take(100):
+        yield [input_value]
+
+    # Normalize the input image so that each pixel value is between 0 to 1.
+    train_images = train_images / 255.0
+    test_images = test_images / 255.0
+
+    # Define the model architecture
+    model = keras.Sequential([
+        keras.layers.Flatten(input_shape=(28, 28)),
+        keras.layers.Dense(128, activation=tf.nn.relu),
+        keras.layers.Dense(10)
+    ])
+
+    model.compile(optimizer='adam',
+                  loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+                  metrics=['accuracy'])
+
+    # Train the digit classification model
+    model.fit(train_images, train_labels, epochs=3)
+
+    # Convert Keras model to TF Lite format.
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+
+    # quantize the model
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    converter.representative_dataset = representative_dataset
+    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+    converter.inference_input_type = tf.uint8
+    converter.inference_output_type = tf.uint8
+
+    tflite_quant_model = converter.convert()
+
+    module_name = str(os.path.basename(__file__)).split('.')[0]
+    model_path = os.path.join(path, f'{module_name}_uint8.tflite')
+    # save model to a file
+    with open(model_path, 'wb') as f:
+        f.write(tflite_quant_model)
+
+if __name__ == '__main__':
+    path = "model"
+    os.makedirs(path, exist_ok=True)
+    generate_model(path)
