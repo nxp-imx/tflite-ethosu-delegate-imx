@@ -4,7 +4,7 @@ Package:                     tflite-ethosu-delegate.git
 Outgoing License:            Apache-2.0 
 License File:                LICENSE
 Type of Content:             source
-Description and comments:    tflite-ethosu-delegate is on tensorflow-lite external delegate for ethos-u NPU on iMX93 platform
+Description and comments:    TensorFlow Lite Delegate for i.MX93 ethos-u NPU.
 Release Location:            https://github.com/nxp-imx/tflite-ethosu-delegate-imx
 Origin:                      NXP (Apache-2.0)
 
