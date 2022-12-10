@@ -19,7 +19,7 @@
 #define ETHOSU_CUSTOM_NAME "ethos-u"
 
 #define OFFLINE_MEM_ALLOC_METADATA "OfflineMemoryAllocation"
-#define METADATA_SIZE(number) ((number + 3) * 4)
+#define METADATA_SIZE(buffer) ((reinterpret_cast<const uint32_t*>(buffer))[2])
 #define METADATA_TO_OFFSET(data) reinterpret_cast<const int32_t*>(data + 12)
 
 #define CMS_TENSOR_INDEX 0

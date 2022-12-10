@@ -34,7 +34,8 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
     size_t bytes;
     TF_LITE_ENSURE_OK(context, context->GetModelMetadata(context,
                       OFFLINE_MEM_ALLOC_METADATA, &buffer, &bytes));
-    if (bytes != METADATA_SIZE(context->tensors_size)) {
+    auto tensor_count = params->input_tensors->size + params->output_tensors->size;
+    if (bytes < 6 || METADATA_SIZE(buffer) < tensor_count) {
         TF_LITE_KERNEL_LOG(context, "Failed to get address offsets from metadata\n");
         return kTfLiteDelegateError;
     }
