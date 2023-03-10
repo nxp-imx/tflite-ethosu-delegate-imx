@@ -49,3 +49,42 @@ If tensorflow source code downloaded by cmake, you can find it in <build_output_
                   --external_delegate_options='enable_cycle_counter:true;pmu_event0:3;pmu_event1:4;pmu_event2:5;pmu_event3:6' \
                   --graph=<tflite_model.tflite>
 ```
+
+BuiltinOperator.SQUEEZE			kTfLiteBuiltinSqueeze
+BuiltinOperator.SHAPE			kTfLiteBuiltinShape
+BuiltinOperator.SPLIT_V			kTfLiteBuiltinSplitV
+BuiltinOperator.EXP			kTfLiteBuiltinExp
+BuiltinOperator.EXPAND_DIMS		kTfLiteBuiltinExpandDims
+BuiltinOperator.PRELU			kTfLiteBuiltinPrelu
+BuiltinOperator.ADD			kTfLiteBuiltinAdd
+BuiltinOperator.AVERAGE_POOL_2D		kTfLiteBuiltinAveragePool2d
+BuiltinOperator.MAX_POOL_2D		kTfLiteBuiltinMaxPool2d
+BuiltinOperator.CONV_2D			kTfLiteBuiltinConv2d
+BuiltinOperator.DEPTHWISE_CONV_2D	kTfLiteBuiltinDepthwiseConv2d
+BuiltinOperator.TRANSPOSE_CONV		kTfLiteBuiltinTransposeConv
+BuiltinOperator.FULLY_CONNECTED		kTfLiteBuiltinFullyConnected
+BuiltinOperator.RESHAPE			kTfLiteBuiltinReshape
+BuiltinOperator.CONCATENATION		kTfLiteBuiltinConcatenation
+BuiltinOperator.PAD			kTfLiteBuiltinPad
+BuiltinOperator.SPLIT			kTfLiteBuiltinSplit
+BuiltinOperator.UNPACK			kTfLiteBuiltinUnpack
+BuiltinOperator.ABS			kTfLiteBuiltinAbs
+BuiltinOperator.SOFTMAX			kTfLiteBuiltinSoftmax
+BuiltinOperator.HARD_SWISH		kTfLiteBuiltinHardSwish
+BuiltinOperator.PACK			kTfLiteBuiltinPack
+BuiltinOperator.STRIDED_SLICE		kTfLiteBuiltinStridedSlice
+BuiltinOperator.RELU			kTfLiteBuiltinRelu
+BuiltinOperator.RELU6			kTfLiteBuiltinRelu6
+BuiltinOperator.RELU_N1_TO_1		kTfLiteBuiltinReluN1To1
+BuiltinOperator.LEAKY_RELU		kTfLiteBuiltinLeakyRelu
+BuiltinOperator.SUB			kTfLiteBuiltinSub
+BuiltinOperator.MEAN			kTfLiteBuiltinMean
+BuiltinOperator.QUANTIZE		kTfLiteBuiltinQuantize
+BuiltinOperator.MAXIMUM			kTfLiteBuiltinMaximum
+BuiltinOperator.MUL			kTfLiteBuiltinMul
+BuiltinOperator.TANH			kTfLiteBuiltinTanh
+BuiltinOperator.MINIMUM			kTfLiteBuiltinMinimum
+BuiltinOperator.RESIZE_BILINEAR		kTfLiteBuiltinResizeBilinear
+BuiltinOperator.RESIZE_NEAREST_NEIGHBOR	kTfLiteBuiltinResizeNearestNeighbor
+BuiltinOperator.SLICE			kTfLiteBuiltinSlice
+BuiltinOperator.LOGISTIC		kTfLiteBuiltinLogistic

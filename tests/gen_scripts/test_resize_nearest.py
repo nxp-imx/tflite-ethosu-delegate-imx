@@ -1,5 +1,5 @@
 #
-# Copyright 2020-2022 NXP
+# Copyright 2020-2023 NXP
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -16,7 +16,7 @@ def generate_model(path):
           yield [data1]
 
     x = tf.constant(1., shape=SP)
-    func = tf.function(lambda x: tf.compat.v1.image.resize_bilinear(x, [4, 6]))
+    func = tf.function(lambda x: tf.compat.v1.image.resize_nearest_neighbor(x, [4, 6]))
     concrete_func = func.get_concrete_function(x)
 
     # quantize the model

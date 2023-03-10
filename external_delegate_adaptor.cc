@@ -10,7 +10,7 @@
 
 #include "tensorflow/lite/c/common.h"
 #include "tensorflow/lite/tools/command_line_flags.h"
-#include "tensorflow/lite/tools/logging.h"
+#include "tensorflow/lite/minimal_logging.h"
 
 #include "ethosu_delegate.h"
 
@@ -74,20 +74,27 @@ TfLiteDelegate* CreateEthosuDelegateFromOptions(char** options_keys,
       return nullptr;
   }
 
-  TFLITE_LOG(INFO) << "Ethosu delegate: device_name set to "
-                   << options.device_name << ".";
-  TFLITE_LOG(INFO) << "Ethosu delegate: timeout set to "
-                   << options.timeout << ".";
-  TFLITE_LOG(INFO) << "Ethosu delegate: enable_cycle_counter set to "
-                   << options.enable_cycle_counter << ".";
-  TFLITE_LOG(INFO) << "Ethosu delegate: pmu_event0 set to "
-                   << options.pmu_counter_config[0] << ".";
-  TFLITE_LOG(INFO) << "Ethosu delegate: pmu_event1 set to "
-                   << options.pmu_counter_config[1] << ".";
-  TFLITE_LOG(INFO) << "Ethosu delegate: pmu_event2 set to "
-                   << options.pmu_counter_config[2] << ".";
-  TFLITE_LOG(INFO) << "Ethosu delegate: pmu_event3 set to "
-                   << options.pmu_counter_config[3] << ".";
+  TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
+                   "Ethosu delegate: device_name set to %s.",
+                   options.device_name.c_str());
+  TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
+                   "Ethosu delegate: timeout set to %ld.",
+                   options.timeout);
+  TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
+                   "Ethosu delegate: enable_cycle_counter set to %d.",
+                   options.enable_cycle_counter);
+  TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
+                   "Ethosu delegate: pmu_event0 set to %d.",
+                   options.pmu_counter_config[0]);
+  TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
+                   "Ethosu delegate: pmu_event1 set to %d.",
+                   options.pmu_counter_config[1]);
+  TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
+                   "Ethosu delegate: pmu_event2 set to %d.",
+                   options.pmu_counter_config[2]);
+  TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
+                   "Ethosu delegate: pmu_event3 set to %d.",
+                   options.pmu_counter_config[3]);
   return EthosuDelegateCreate(&options);
 }
 

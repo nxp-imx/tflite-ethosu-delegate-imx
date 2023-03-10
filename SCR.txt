@@ -31,4 +31,4 @@ Package Category:            tensorflow-lite simple delegate API source and head
 Type of Content:             source and header file
 Description and comments:    A TensorFlow Lite Delegate allows you to run your models (part or whole) on another executor.
 Origin:                      tensorflow v2.10.0 (Apache-2.0) - https://github.com/tensorflow/tensorflow
-File location:               simple_delegate.cc simple_delegate.h
+File location:               simple_delegate.cc simple_delegate.h tflite_enum_mapping.h
