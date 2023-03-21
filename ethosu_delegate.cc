@@ -20,6 +20,7 @@
 
 #include "tensorflow/lite/context_util.h"
 #include "tensorflow/lite/builtin_ops.h"
+#include "tensorflow/lite/minimal_logging.h"
 
 using namespace std;
 
@@ -56,10 +57,24 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
     if (vela_node == 0) {
         //Online model compile
         try {
-            model_converter = ModelConverter::GetSingleton();
-            model = model_converter->convert(context, params);
+            if (options.cache_file_path != "" &&
+                access(options.cache_file_path.c_str(), F_OK) == 0) {
+                //Cache file exist, read model from cache file.
+                TFLITE_LOG(TFLITE_LOG_INFO, "Read model from cache file %s",
+                                   options.cache_file_path.c_str());
+                model = readTFLiteModel(options.cache_file_path);
+            } else {
+                model_converter = ModelConverter::GetSingleton();
+                model = model_converter->convert(context, params);
+                if (options.cache_file_path != "") {
+                    // Write to cache file
+                    TFLITE_LOG(TFLITE_LOG_INFO, "Write model to cache file %s",
+                                       options.cache_file_path.c_str());
+                    writeTFLiteModel(model.get(), options.cache_file_path);
+                }
+            }
         } catch (const char* msg) {
-            TF_LITE_KERNEL_LOG(context, msg);
+            TF_LITE_KERNEL_LOG(context, "Failed to build model, %s\n", msg);
             return kTfLiteDelegateError;
         }
         TF_LITE_ENSURE_EQ(context, model->subgraphs.size(), 1);
@@ -92,7 +107,7 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
   }
 
   TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) override {
-    if(model_converter == nullptr || model == nullptr) {
+    if(model == nullptr) {
         //Offline model compile
         TF_LITE_ENSURE_OK(context, PrepareOfflineCompiledModel(context, node));
     } else {
@@ -372,7 +387,7 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
   ModelConverter *model_converter;
 
   EthosU::Device* ethosu_device;
-  shared_ptr<EthosU::Buffer> ethosu_arena_buffer;  //Output buffer for input/ouput/scratch tensor
+  shared_ptr<EthosU::Buffer> ethosu_arena_buffer;  //Input buffer for input/ouput/scratch tensor
   shared_ptr<EthosU::Buffer> ethosu_flash_buffer;  //Input buffer for weight tensor
   vector<OperationDataType> operations;
   std::map<int, int32_t> tensor_address_map;
@@ -422,6 +437,7 @@ EthosuDelegateOptions EthosuDelegateOptionsDefault() {
   EthosuDelegateOptions options;
 
   options.device_name = ETHOSU_DEFAULT_DEVICE_NAME;
+  options.cache_file_path = "";
   options.timeout = ETHOSU_DEFAULT_TIMEOUT;
   options.enable_cycle_counter = false;
   memset(options.pmu_counter_config, 0, sizeof(options.pmu_counter_config));

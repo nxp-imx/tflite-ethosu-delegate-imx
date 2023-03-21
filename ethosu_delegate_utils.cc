@@ -16,6 +16,49 @@
 namespace tflite {
 namespace ethosu {
 
+std::unique_ptr<tflite::ModelT> readTFLiteModel(const std::string &filename) {
+  // Open file.
+  std::ifstream modelFile;
+  modelFile.open(filename, std::ios::binary);
+  if (!modelFile.is_open()) {
+    throw "Error opening model file!";
+  }
+
+  // Get model size.
+  modelFile.seekg(0, std::ios::end);
+  std::streamsize modelSize = modelFile.tellg();
+  modelFile.seekg(0, std::ios::beg);
+
+  // Read model data.
+  std::vector<char> modelData = std::vector<char>(modelSize);
+  modelFile.read(modelData.data(), modelSize);
+  modelFile.close();
+
+  // Read model object and unpack.
+  const tflite::Model *model = tflite::GetModel(modelData.data());
+  return std::unique_ptr<tflite::ModelT>(model->UnPack());
+}
+
+void writeTFLiteModel(const tflite::ModelT *model, const std::string &filename) {
+  // Pack model into buffer.
+  flatbuffers::FlatBufferBuilder fbb;
+  flatbuffers::Offset<tflite::Model> root = tflite::Model::Pack(fbb, model);
+  tflite::FinishModelBuffer(fbb, root);
+  uint32_t size = fbb.GetSize();
+  uint8_t *buff = fbb.GetBufferPointer();
+
+  // Open file.
+  std::ofstream modelFile;
+  modelFile.open(filename, std::ios::binary);
+  if (!modelFile.is_open()) {
+    throw "Error opening model file!";
+  }
+
+  // Write model data.
+  modelFile.write((const char *)buff, size);
+  modelFile.close();
+}
+
 inline std::string CharPtrToStr(const char *in) {
   if (in == nullptr) {
     return std::string("");

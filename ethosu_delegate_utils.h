@@ -38,6 +38,8 @@ private:
 
 std::unique_ptr<ModelT> PrepareModel(TfLiteContext* context,
                                      const TfLiteDelegateParams* params);
+std::unique_ptr<tflite::ModelT> readTFLiteModel(const std::string &filename);
+void writeTFLiteModel(const tflite::ModelT *model, const std::string &filename);
 
 size_t GetTensorDataSize(std::unique_ptr<tflite::TensorT> &tensor);
 

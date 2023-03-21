@@ -37,7 +37,9 @@ typedef struct {
   std::string device_name;
   // Timeout in nanoseconds for inferencing.
   int64_t timeout;
-  // If enbale cycle counter when inference.
+  //vela cache binary path
+  std::string cache_file_path;
+  // If enable cycle counter when inference.
   bool enable_cycle_counter;
   // Pmu counter config.
   int32_t pmu_counter_config[ETHOSU_PMU_EVENT_MAX];

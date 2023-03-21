@@ -39,6 +39,7 @@ TfLiteDelegate* CreateEthosuDelegateFromOptions(char** options_keys,
     argv.push_back(option_args.rbegin()->c_str());
   }
 
+  constexpr char kHelp[] = "help";
   constexpr char kDeviceName[] = "device_name";
   constexpr char kTimeout[] = "timeout";
   constexpr char kEnableCycleCounter[] = "enable_cycle_counter";
@@ -46,15 +47,22 @@ TfLiteDelegate* CreateEthosuDelegateFromOptions(char** options_keys,
   constexpr char kPmuEvent1[] = "pmu_event1";
   constexpr char kPmuEvent2[] = "pmu_event2";
   constexpr char kPmuEvent3[] = "pmu_event3";
+  constexpr char kCacheFilePath[] = "cache_file_path";
 
+  bool show_help = false;
   std::vector<tflite::Flag> flag_list = {
+      tflite::Flag::CreateFlag(kHelp,
+                               &show_help,
+                               "Show the help information."),
       tflite::Flag::CreateFlag(kDeviceName, &options.device_name,
                                "Device name for ethosu."),
+      tflite::Flag::CreateFlag(kCacheFilePath, &options.cache_file_path,
+                               "Set the path if need to save/load vela binary."),
       tflite::Flag::CreateFlag(kTimeout, &options.timeout,
                                "Timeout in nanoseconds for inferencing."),
       tflite::Flag::CreateFlag(kEnableCycleCounter,
                                &options.enable_cycle_counter,
-                               "If enbale cycle counter when inference."),
+                               "If enable cycle counter when inference."),
       tflite::Flag::CreateFlag(kPmuEvent0,
                                &options.pmu_counter_config[0],
                                "Pmu event 0."),
@@ -70,13 +78,18 @@ TfLiteDelegate* CreateEthosuDelegateFromOptions(char** options_keys,
   };
 
   int argc = num_options + 1;
-  if (!tflite::Flags::Parse(&argc, argv.data(), flag_list)) {
+  if (!tflite::Flags::Parse(&argc, argv.data(), flag_list) || show_help) {
+      std::string usage = Flags::Usage(argv[0], flag_list);
+      TFLITE_LOG_PROD(tflite::TFLITE_LOG_INFO, usage.c_str());
       return nullptr;
   }
 
   TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
                    "Ethosu delegate: device_name set to %s.",
                    options.device_name.c_str());
+  TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
+                   "Ethosu delegate: cache_file_path set to %s.",
+                   options.cache_file_path.c_str());
   TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
                    "Ethosu delegate: timeout set to %ld.",
                    options.timeout);
