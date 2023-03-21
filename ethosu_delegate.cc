@@ -37,6 +37,14 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
                     const TfLiteDelegateParams* params) override {
     try {
         ethosu_device = EthosU::Device::GetSingleton(options.device_name.c_str());
+
+        if (options.enable_profiling && options.profiling_buffer_size != 0){
+            size_t size = sizeof(EthosuQreadEvent) * options.profiling_buffer_size;
+            ethosu_qread_buffer = make_shared<EthosU::Buffer>(*ethosu_device, size);
+            ethosu_qread_buffer->resize(0);
+        } else {
+            ethosu_qread_buffer = nullptr;
+        }
     } catch (exception &e) {
         TF_LITE_KERNEL_LOG(context, "Failed to create ethos_u driver.\n");
         return kTfLiteDelegateError;
@@ -60,7 +68,7 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
             if (options.cache_file_path != "" &&
                 access(options.cache_file_path.c_str(), F_OK) == 0) {
                 //Cache file exist, read model from cache file.
-                TFLITE_LOG(TFLITE_LOG_INFO, "Read model from cache file %s",
+                TFLITE_LOG(TFLITE_LOG_INFO, "Ethosu delegate: Read model from cache file %s",
                                    options.cache_file_path.c_str());
                 model = readTFLiteModel(options.cache_file_path);
             } else {
@@ -68,7 +76,7 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
                 model = model_converter->convert(context, params);
                 if (options.cache_file_path != "") {
                     // Write to cache file
-                    TFLITE_LOG(TFLITE_LOG_INFO, "Write model to cache file %s",
+                    TFLITE_LOG(TFLITE_LOG_INFO, "Ethosu delegate: Write model to cache file %s",
                                        options.cache_file_path.c_str());
                     writeTFLiteModel(model.get(), options.cache_file_path);
                 }
@@ -333,6 +341,10 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
       for (auto& op : operations) {
         vector<shared_ptr<EthosU::Buffer>> ifm {ethosu_arena_buffer, op.ethosu_layout_buffer};
         vector<shared_ptr<EthosU::Buffer>> ofm {};
+        if (options.enable_profiling) {
+          ofm.push_back(ethosu_qread_buffer);
+          ethosu_qread_buffer->resize(0);
+        }
         if (ethosu_flash_buffer != nullptr)
           ifm.push_back(ethosu_flash_buffer);
 
@@ -355,6 +367,20 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
         }
         if (options.enable_cycle_counter) {
           cout << "Ethos-u cycle counter: " << inference.getCycleCounter() << endl;
+        }
+        if (options.enable_profiling) {
+          auto count = ethosu_qread_buffer->size() / sizeof(EthosuQreadEvent);
+          if (count == options.profiling_buffer_size) {
+            cout << "Ethos_u profiling_buffer_size is too small, please set a larger number" << endl;
+          } else {
+            auto qread_buffer = reinterpret_cast<EthosuQreadEvent*>(ethosu_qread_buffer->data());
+            cout << "Ethos_u qread profiling data." << endl;
+            for (int i =0; i < count; i ++) {
+                cout << "index:" << i << ",qread:0x" << hex << qread_buffer[i].qread
+                     << ",status:0x" << hex << qread_buffer[i].status
+                     << ",cycle count:" << dec << qread_buffer[i].cycleCount << endl;
+            }
+          }
         }
       }
       // Get addresses to output data, copy output data
@@ -389,6 +415,7 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
   EthosU::Device* ethosu_device;
   shared_ptr<EthosU::Buffer> ethosu_arena_buffer;  //Input buffer for input/ouput/scratch tensor
   shared_ptr<EthosU::Buffer> ethosu_flash_buffer;  //Input buffer for weight tensor
+  shared_ptr<EthosU::Buffer> ethosu_qread_buffer;  //Ouput buffer for profiling qread data
   vector<OperationDataType> operations;
   std::map<int, int32_t> tensor_address_map;
   vector<uint32_t> pmu_counter_config;
@@ -440,6 +467,8 @@ EthosuDelegateOptions EthosuDelegateOptionsDefault() {
   options.cache_file_path = "";
   options.timeout = ETHOSU_DEFAULT_TIMEOUT;
   options.enable_cycle_counter = false;
+  options.enable_profiling = false;
+  options.profiling_buffer_size = DEFAULT_QREAD_BUFFER_SIZE;
   memset(options.pmu_counter_config, 0, sizeof(options.pmu_counter_config));
 
   return options;

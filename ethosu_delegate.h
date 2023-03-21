@@ -31,6 +31,16 @@
 #define BUFFER_ALIGNMENT 16
 #define ALIGN_SIZE(size) ((size + BUFFER_ALIGNMENT - 1) & (~(BUFFER_ALIGNMENT - 1)))
 
+#define DEFAULT_QREAD_BUFFER_SIZE 2048
+typedef struct {
+    uint64_t cycleCount;
+    uint32_t qread;
+    uint32_t status;
+    struct {
+        uint32_t eventConfig;
+        uint32_t eventCount;
+    } pmu[ETHOSU_PMU_EVENT_MAX];
+} EthosuQreadEvent;
 
 typedef struct {
   // Device name for ethosu.
@@ -43,6 +53,10 @@ typedef struct {
   bool enable_cycle_counter;
   // Pmu counter config.
   int32_t pmu_counter_config[ETHOSU_PMU_EVENT_MAX];
+  // If enable layer by layer profiling
+  bool enable_profiling;
+  // Qread buffer size for layer by layer profiling
+  int32_t profiling_buffer_size;
 } EthosuDelegateOptions;
 
 // Returns a structure with the default delegate options.

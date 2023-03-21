@@ -47,6 +47,8 @@ TfLiteDelegate* CreateEthosuDelegateFromOptions(char** options_keys,
   constexpr char kPmuEvent1[] = "pmu_event1";
   constexpr char kPmuEvent2[] = "pmu_event2";
   constexpr char kPmuEvent3[] = "pmu_event3";
+  constexpr char kEnableProfiling[] = "enable_profiling";
+  constexpr char kProfilingBufferSize[] = "profiling_buffer_size";
   constexpr char kCacheFilePath[] = "cache_file_path";
 
   bool show_help = false;
@@ -63,6 +65,12 @@ TfLiteDelegate* CreateEthosuDelegateFromOptions(char** options_keys,
       tflite::Flag::CreateFlag(kEnableCycleCounter,
                                &options.enable_cycle_counter,
                                "If enable cycle counter when inference."),
+      tflite::Flag::CreateFlag(kEnableProfiling,
+                               &options.enable_profiling,
+                               "If enable layer by layer profiling."),
+      tflite::Flag::CreateFlag(kProfilingBufferSize,
+                               &options.profiling_buffer_size,
+                               "Qread buffer size for layer by layer profiling."),
       tflite::Flag::CreateFlag(kPmuEvent0,
                                &options.pmu_counter_config[0],
                                "Pmu event 0."),
@@ -84,6 +92,10 @@ TfLiteDelegate* CreateEthosuDelegateFromOptions(char** options_keys,
       return nullptr;
   }
 
+  if (options.enable_profiling) {
+      options.enable_cycle_counter = true;
+  }
+
   TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
                    "Ethosu delegate: device_name set to %s.",
                    options.device_name.c_str());
@@ -96,6 +108,12 @@ TfLiteDelegate* CreateEthosuDelegateFromOptions(char** options_keys,
   TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
                    "Ethosu delegate: enable_cycle_counter set to %d.",
                    options.enable_cycle_counter);
+  TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
+                   "Ethosu delegate: enable_profiling set to %d.",
+                   options.enable_profiling);
+  TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
+                   "Ethosu delegate: profiling_buffer_size set to %d.",
+                   options.profiling_buffer_size);
   TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
                    "Ethosu delegate: pmu_event0 set to %d.",
                    options.pmu_counter_config[0]);
