@@ -14,11 +14,8 @@ def verify(cpu_model, vela_model, delegate_path):
     cpu_interpreter = tflite.Interpreter(cpu_model)
     cpu_interpreter.allocate_tensors()
 
-    if (delegate_path):
-        ext_delegate = [tflite.load_delegate(delegate_path)]
-        vela_interpreter = tflite.Interpreter(vela_model, experimental_delegates=ext_delegate)
-    else:
-        vela_interpreter = tflite.Interpreter(vela_model)
+    ext_delegate = [tflite.load_delegate(delegate_path)]
+    vela_interpreter = tflite.Interpreter(vela_model, experimental_delegates=ext_delegate)
     vela_interpreter.allocate_tensors()
 
     cpu_inputs = cpu_interpreter.get_input_details()
@@ -55,7 +52,7 @@ parser.add_argument(
 parser.add_argument(
     '-d',
     '--delegate',
-    default='',
+    required=True,
     help='Delegate library path')
 args = parser.parse_args()
 
@@ -63,4 +60,6 @@ for model in os.listdir(args.input):
     cpu_model = os.path.join(args.input, model)
     vela_model = vela.convert(cpu_model)
     ret = verify(cpu_model, vela_model, args.delegate)
-    print("Model %33s %s" % (model, "PASS" if ret else "FAIL"))
+    print("Offline compile, model %33s %s" % (model, "PASS" if ret else "FAIL"))
+    ret = verify(cpu_model, cpu_model, args.delegate)
+    print("Online compile, model %33s %s" % (model, "PASS" if ret else "FAIL"))
