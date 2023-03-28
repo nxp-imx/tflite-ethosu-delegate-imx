@@ -27,6 +27,9 @@ list(APPEND ETHOSU_DELEGATES_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/ethosu_supported_ops.cc
 )
 
-list(APPEND ETHOSU_DELEGATE_DEPENDENCIES python3.10)
+find_package (Python COMPONENTS Interpreter Development)
+include_directories(${Python_INCLUDE_DIRS})
+list(APPEND ETHOSU_DELEGATE_DEPENDENCIES ${Python_LIBRARIES})
+
 add_library(ethosu_delegate SHARED ${ETHOSU_DELEGATES_SRCS})
 target_link_libraries(ethosu_delegate ${ETHOSU_DELEGATE_DEPENDENCIES})

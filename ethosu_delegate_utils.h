@@ -8,7 +8,7 @@
 #ifndef TENSORFLOW_LITE_DELEGATES_ETHOSU_DELEGATE_UTILS_H_
 #define TENSORFLOW_LITE_DELEGATES_ETHOSU_DELEGATE_UTILS_H_
 
-#include <python3.10/Python.h>
+#include <Python.h>
 #include "flatbuffers/flexbuffers.h"
 #include "schema_generated.h"
 
