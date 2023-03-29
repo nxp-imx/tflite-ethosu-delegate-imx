@@ -100,8 +100,8 @@ TfLiteStatus DelegatePrepare(TfLiteContext* context,
       delegate_options.min_nodes_per_partition);
 
   TFLITE_LOG_PROD(tflite::TFLITE_LOG_INFO,
-                  "%s delegate: %d nodes delegated out of %d nodes with "
-                  "%d partitions.\n",
+                  "%s: %d nodes delegated out of %d nodes with "
+                  "%d partitions.",
                   delegate->Name(), supported_nodes.size(),
                   helper.num_total_nodes(), helper.num_partitions());
   TfLiteRegistration delegate_kernel_registration =

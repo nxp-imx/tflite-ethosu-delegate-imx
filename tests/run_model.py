@@ -59,6 +59,7 @@ args = parser.parse_args()
 for model in os.listdir(args.input):
     cpu_model = os.path.join(args.input, model)
     vela_model = vela.convert(cpu_model)
+    print("Model %33s" % model)
     ret = verify(cpu_model, vela_model, args.delegate)
     print("Offline compile, model %33s %s" % (model, "PASS" if ret else "FAIL"))
     ret = verify(cpu_model, cpu_model, args.delegate)
