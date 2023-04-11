@@ -93,6 +93,10 @@ const BuiltinOperatorList multiple_batch_ops{kTfLiteBuiltinSplitV, kTfLiteBuilti
                                              kTfLiteBuiltinSoftmax, kTfLiteBuiltinUnpack, kTfLiteBuiltinSplit, kTfLiteBuiltinReshape,
                                              kTfLiteBuiltinStridedSlice, kTfLiteBuiltinFullyConnected};
 
+inline bool ValueInRange(int value, const EthosuValueRange range){
+    return range[0] <= value && value <= range[1];
+}
+
 bool ConstraintTensorPre(TfLiteContext* context,
                          const TfLiteNode* node,
                          int32_t builtin_code){
@@ -247,8 +251,8 @@ bool ConstraintStrideRange(TfLiteContext* context,
   T* param = reinterpret_cast<T*>(node->builtin_data);
 
   //Stride values for both width and height must be in the range {}
-  return (stride_range[0] <= param->stride_width <= stride_range[1]) &&
-         (stride_range[0] <= param->stride_height <= stride_range[1]);
+  return ValueInRange(param->stride_width, stride_range) &&
+         ValueInRange(param->stride_height, stride_range);
 }
 
 template <typename T>
@@ -269,8 +273,8 @@ bool ConstraintDilatedRange(TfLiteContext* context,
   auto dilation_h_factor = GETVALUE(T, param, dilation_height_factor, 1);
   auto area_w = (kernel_w - 1) * dilation_w_factor + 1;
   auto area_h = (kernel_h - 1) * dilation_h_factor + 1;
-  return (dilated_height_range[0] <= area_h <= dilated_height_range[1]) &&
-         (dilated_product_range[0] <= area_w * area_h <= dilated_product_range[1]);
+  return ValueInRange(area_h, dilated_height_range) &&
+         ValueInRange(area_w * area_h, dilated_product_range);
 }
 
 bool ConstraintWeights(TfLiteContext* context,
@@ -399,8 +403,8 @@ bool ConstraintFilterRange(TfLiteContext* context,
 
   //Kernel filter values for both width and height must be in the range {}
   if (param->padding == kTfLitePaddingSame) {
-    return (filter_range[0] <= param->filter_width <= filter_range[1] &&
-            filter_range[0] <= param->filter_height <= filter_range[1]);
+    return ValueInRange(param->filter_width, filter_range) &&
+           ValueInRange(param->filter_height, filter_range);
   }
   return true;
 }
@@ -412,7 +416,7 @@ bool ConstraintFilterHeightRange(TfLiteContext* context,
   T* param = reinterpret_cast<T*>(node->builtin_data);
 
   //Kernel filter height must be in the range {}
-  return filter_height_range[0] <= param->filter_height <= filter_height_range[1];
+  return ValueInRange(param->filter_height, filter_height_range);
 }
 
 template <typename T>
@@ -423,7 +427,7 @@ bool ConstraintFilterProductRange(TfLiteContext* context,
 
   //Product of kernel filter width and height must be in the range{}
   auto product = param->filter_height * param->filter_width;
-  return filter_product_range[0] <= product <= filter_product_range[1];
+  return ValueInRange(product, filter_product_range);
 }
 
 template <typename T>
@@ -434,7 +438,7 @@ bool ConstraintFilterHeightRangeValidPad(TfLiteContext* context,
 
   //Kernel filter height must be in the range {}
   if (param->padding == kTfLitePaddingValid) {
-    return filter_height_range[0] <= param->filter_height <= filter_height_range[1];
+    return ValueInRange(param->filter_height, filter_height_range);
   }
   return true;
 }
@@ -448,7 +452,7 @@ bool ConstraintFilterProductRangeValidPad(TfLiteContext* context,
   //Product of kernel filter width and height must be in the range{}
   auto product = param->filter_height * param->filter_width;
   if (param->padding == kTfLitePaddingValid) {
-    return filter_product_range[0] <= product <= filter_product_range[1];
+    return ValueInRange(product, filter_product_range);
   }
   return true;
 }
