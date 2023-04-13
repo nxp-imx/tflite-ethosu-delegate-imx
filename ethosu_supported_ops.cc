@@ -1108,13 +1108,13 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinResizeBilinear,
      { IFM_INDICES,
-       {ConstraintResize<TfLiteResizeBilinearParams>, ConstraintResizeSize, ConstraintResizeAttrs<TfLiteResizeBilinearParams>}
+       {ConstraintResize<TfLiteResizeBilinearParams>, ConstraintResizeSize, ConstraintResizeAttrs<TfLiteResizeBilinearParams>,
+        ConstraintResizebiHalfPixelCentersDims<TfLiteResizeBilinearParams>}
      }
   },
   { kTfLiteBuiltinResizeNearestNeighbor,
      { IFM_INDICES,
-       {ConstraintResize<TfLiteResizeNearestNeighborParams>, ConstraintResizeSize, ConstraintResizeAttrs<TfLiteResizeNearestNeighborParams>,
-        ConstraintResizebiHalfPixelCentersDims<TfLiteResizeNearestNeighborParams>}
+       {ConstraintResize<TfLiteResizeNearestNeighborParams>, ConstraintResizeSize, ConstraintResizeAttrs<TfLiteResizeNearestNeighborParams>}
      }
   },
 };
