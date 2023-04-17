@@ -144,6 +144,9 @@ public:
 
     int getFd() const;
 
+    static std::shared_ptr<Buffer> GetSingletonFlash(Device* device, size_t size);
+    static std::shared_ptr<Buffer> GetSingletonArena(Device* device, size_t size);
+
 private:
     int fd;
     char *dataPtr;
