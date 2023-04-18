@@ -28,8 +28,10 @@ list(APPEND ETHOSU_DELEGATES_SRCS
 )
 
 find_package (Python COMPONENTS Interpreter Development)
+get_filename_component(PYTHON_LIB_NAME ${Python_LIBRARIES} NAME)
 include_directories(${Python_INCLUDE_DIRS})
 list(APPEND ETHOSU_DELEGATE_DEPENDENCIES ${Python_LIBRARIES})
 
 add_library(ethosu_delegate SHARED ${ETHOSU_DELEGATES_SRCS})
 target_link_libraries(ethosu_delegate ${ETHOSU_DELEGATE_DEPENDENCIES})
+target_compile_options(ethosu_delegate PUBLIC "-DPYTHON_LIB=${PYTHON_LIB_NAME}")

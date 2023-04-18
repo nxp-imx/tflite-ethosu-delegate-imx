@@ -561,10 +561,12 @@ size_t GetTensorDataSize(std::unique_ptr<tflite::TensorT> &tensor) {
 }
 
 ModelConverter::ModelConverter() {
+#define XSTR(x) #x
+#define STR(x) XSTR(x)
     needInitialization = !Py_IsInitialized();
     if (needInitialization) {
         Py_Initialize();
-        if (dlopen("libpython3.10.so", RTLD_LAZY | RTLD_GLOBAL) == nullptr)
+        if (dlopen(STR(PYTHON_LIB), RTLD_LAZY | RTLD_GLOBAL) == nullptr)
             throw "Failed to load python library";
     }
     pyModule = PyImport_ImportModule("ethosu.vela.vela");
