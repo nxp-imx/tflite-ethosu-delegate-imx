@@ -683,10 +683,6 @@ ConstraintMeanAxisValue(TfLiteContext* context,
   auto& in = context->tensors[node->inputs->data[0]];
   auto& axis = context->tensors[node->inputs->data[1]];
 
-  //Input tensor must be at least 2D
-  if (!(2 <= in.dims->size <= 4))
-    return false;
-
   auto axis_data = GetTensorData<int32_t>(&axis); 
   auto num_axis = NumElements(&axis);
   //Axis indices must correspond to height and width axes
@@ -706,6 +702,8 @@ ConstraintMeanAxisValue(TfLiteContext* context,
       if ((axis_data[0] == 1 && axis_data[1] == 2) || (axis_data[0] == 2 && axis_data[1] == 1))
         return true;
     }
+  } else {
+    return false;
   }
   return false;
 }
@@ -1065,7 +1063,7 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinMean,
      { IFM_INDICES,
-       {ConstraintInput8bit, ConstraintMeanProduct<TfLiteReducerParams>, ConstraintMeanHeightSingleAxis}
+       {ConstraintInput8bit, ConstraintMeanAxisValue, ConstraintMeanProduct<TfLiteReducerParams>, ConstraintMeanHeightSingleAxis}
      }
   },
   { kTfLiteBuiltinAveragePool2d,
