@@ -354,7 +354,16 @@ void SetBuiltinOptions(OperatorT *op, int32_t op_code, void* data){
       op->builtin_options.Set(option);
       break;
     }
-     break;
+    case BuiltinOperator_SPACE_TO_BATCH_ND: {
+      auto option = SpaceToBatchNDOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_BATCH_TO_SPACE_ND: {
+      auto option = BatchToSpaceNDOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
     case BuiltinOperator_LOGISTIC:
     case BuiltinOperator_RELU:
     case BuiltinOperator_PRELU:

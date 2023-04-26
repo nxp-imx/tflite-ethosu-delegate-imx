@@ -184,7 +184,7 @@ bool ConstraintTensorPost(TfLiteContext* context,
       return false;
     //Tensor dimensions must be in the range [{}, {}]
     for (int i = 0; i < tensor->dims->size; i ++) {
-        if (!(tens_dim_range[0] < tensor->dims->data[i] < tens_dim_range[1]))
+        if (!ValueInRange(tensor->dims->data[i], tens_dim_range))
           return false;
     }
     if (builtin_code != kTfLiteBuiltinShape && !IsValidQuant(tensor->quantization, builtin_code))
@@ -922,6 +922,16 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
      }
   },
   { kTfLiteBuiltinAbs,
+     { IFM_INDICES,
+       {}
+     }
+  },
+  { kTfLiteBuiltinBatchToSpaceNd,
+     { IFM_INDICES,
+       {}
+     }
+  },
+  { kTfLiteBuiltinSpaceToBatchNd,
      { IFM_INDICES,
        {}
      }
