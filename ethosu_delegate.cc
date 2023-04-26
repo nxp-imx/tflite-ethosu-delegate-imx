@@ -74,12 +74,13 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
     if (vela_node == 0) {
         //Online model compile
         try {
+	    string cache_file = options.cache_file_path + "/" + to_string(params->nodes_to_replace->data[0]);
             if (options.cache_file_path != "" &&
-                access(options.cache_file_path.c_str(), F_OK) == 0) {
+                access(cache_file.c_str(), F_OK) == 0) {
                 //Cache file exist, read model from cache file.
                 TFLITE_LOG(TFLITE_LOG_INFO, "Ethosu delegate: Read model from cache file %s",
                                    options.cache_file_path.c_str());
-                model = readTFLiteModel(options.cache_file_path);
+                model = readTFLiteModel(cache_file);
             } else {
                 model_converter = ModelConverter::GetSingleton();
                 model = model_converter->convert(context, params);
@@ -87,7 +88,7 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
                     // Write to cache file
                     TFLITE_LOG(TFLITE_LOG_INFO, "Ethosu delegate: Write model to cache file %s",
                                        options.cache_file_path.c_str());
-                    writeTFLiteModel(model.get(), options.cache_file_path);
+                    writeTFLiteModel(model.get(), cache_file);
                 }
             }
         } catch (const char* msg) {
