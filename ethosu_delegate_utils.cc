@@ -621,8 +621,6 @@ std::unique_ptr<ModelT> ModelConverter::convert(ModelT* model) {
 }
 
 ModelConverter::~ModelConverter() {
-    Py_DECREF(pyModule);
-    Py_DECREF(pyCvtFunc);
     if (needInitialization) {
         Py_Finalize();
     }
