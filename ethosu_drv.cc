@@ -193,6 +193,27 @@ Buffer::~Buffer() {
     eclose(fd);
 }
 
+void Buffer::extend(const Device &device, const size_t capacity) {
+    if (capacity < dataCapacity)
+        return;
+    emunmap(dataPtr, dataCapacity);
+    eclose(fd);
+
+    dataCapacity = capacity;
+    ethosu_uapi_buffer_create uapi = {static_cast<uint32_t>(dataCapacity)};
+    fd                             = device.ioctl(ETHOSU_IOCTL_BUFFER_CREATE, static_cast<void *>(&uapi));
+    void *d;
+    try {
+	d = emmap(nullptr, dataCapacity, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    } catch (std::exception &e) {
+        try {
+            eclose(fd);
+        } catch (...) { std::throw_with_nested(e); }
+    }
+    dataPtr = reinterpret_cast<char *>(d);
+    this->resize(dataCapacity);
+}
+
 size_t Buffer::capacity() const {
     return dataCapacity;
 }
@@ -231,7 +252,7 @@ int Buffer::getFd() const {
 std::shared_ptr<Buffer> Buffer::GetSingletonFlash(Device* device, size_t size){
     static std::shared_ptr<Buffer> flash = make_shared<Buffer>(*device, size);
     if (flash->capacity() < size){
-	flash = make_shared<Buffer>(*device, size);
+	flash->extend(*device, size);
     }
     return flash;
 }
@@ -239,7 +260,7 @@ std::shared_ptr<Buffer> Buffer::GetSingletonFlash(Device* device, size_t size){
 std::shared_ptr<Buffer> Buffer::GetSingletonArena(Device* device, size_t size){
     static std::shared_ptr<Buffer> arena = make_shared<Buffer>(*device, size);
     if (arena->capacity() < size){
-	arena = make_shared<Buffer>(*device, size);
+	arena->extend(*device, size);
     }
     return arena;
 }
