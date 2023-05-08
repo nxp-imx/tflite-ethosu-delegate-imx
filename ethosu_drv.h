@@ -136,6 +136,7 @@ public:
     virtual ~Buffer();
 
     size_t capacity() const;
+    void extend(const Device &device, const size_t capacity);
     void clear() const;
     char *data() const;
     void resize(size_t size, size_t offset = 0) const;
@@ -150,7 +151,7 @@ public:
 private:
     int fd;
     char *dataPtr;
-    const size_t dataCapacity;
+    size_t dataCapacity;
 };
 
 class Network {
