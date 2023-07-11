@@ -47,7 +47,6 @@ EthosuValueRange filter_height_range{1, 256};
 EthosuValueRange filter_product_range{1, 256 * 256};
 const int weights_limit = 127 * 65536;
 const int mean_kernel_product = 64 * 64;
-const int mean_kernel_product_avgpool = 256 * 256;
 
 typedef std::set<TfLiteType> TypeList;
 const TypeList supported_dtypes{kTfLiteUInt8, kTfLiteInt8, kTfLiteInt16, kTfLiteInt32};
@@ -84,11 +83,13 @@ extern const std::map<int, OperatorFeature> OPERATOR_MAP;
 
 typedef std::set<int32_t> BuiltinOperatorList;
 const BuiltinOperatorList shapeless_output_ops{kTfLiteBuiltinQuantize};
+const BuiltinOperatorList no_quant_ops{kTfLiteBuiltinShape, kTfLiteBuiltinArgMax};
 const BuiltinOperatorList shapeless_input_ops{kTfLiteBuiltinQuantize, kTfLiteBuiltinSplit, kTfLiteBuiltinSplitV, kTfLiteBuiltinMean,
                                               kTfLiteBuiltinExpandDims, kTfLiteBuiltinMaximum, kTfLiteBuiltinMinimum, kTfLiteBuiltinAdd,
-                                              kTfLiteBuiltinMul, kTfLiteBuiltinSub};
+                                              kTfLiteBuiltinMul, kTfLiteBuiltinSub, kTfLiteBuiltinArgMax};
 const BuiltinOperatorList convolution_like_ops{kTfLiteBuiltinConv2d, kTfLiteBuiltinDepthwiseConv2d, kTfLiteBuiltinTransposeConv};
-const BuiltinOperatorList supported_int32_tensor_ops{kTfLiteBuiltinAdd, kTfLiteBuiltinMul, kTfLiteBuiltinSub, kTfLiteBuiltinShape};
+const BuiltinOperatorList supported_int32_tensor_ops{kTfLiteBuiltinAdd, kTfLiteBuiltinMul, kTfLiteBuiltinSub, kTfLiteBuiltinShape,
+                                                     kTfLiteBuiltinArgMax};
 const BuiltinOperatorList multiple_batch_ops{kTfLiteBuiltinSplitV, kTfLiteBuiltinShape, kTfLiteBuiltinSqueeze, kTfLiteBuiltinSlice,
                                              kTfLiteBuiltinSoftmax, kTfLiteBuiltinUnpack, kTfLiteBuiltinSplit, kTfLiteBuiltinReshape,
                                              kTfLiteBuiltinStridedSlice, kTfLiteBuiltinFullyConnected};
@@ -177,7 +178,7 @@ bool ConstraintTensorPost(TfLiteContext* context,
 
   for (auto tensor : tensors){
     //Tensors must be of type: {}
-    if (supported_dtypes.count(tensor->type) == 0)
+    if (builtin_code != kTfLiteBuiltinArgMax && supported_dtypes.count(tensor->type) == 0)
       return false;
     //Tensors which are int32 are only valid when op type is: {}
     if (tensor->type == kTfLiteInt32 && supported_int32_tensor_ops.count(builtin_code) == 0)
@@ -187,9 +188,8 @@ bool ConstraintTensorPost(TfLiteContext* context,
         if (!ValueInRange(tensor->dims->data[i], tens_dim_range))
           return false;
     }
-    if (builtin_code != kTfLiteBuiltinShape && !IsValidQuant(tensor->quantization, builtin_code))
+    if (no_quant_ops.count(builtin_code) == 0 && !IsValidQuant(tensor->quantization, builtin_code))
       return false;
-    //TODO
     //Input and Output tensors must have quantization scales that fit within float32 precision
   }
   return true;
@@ -202,6 +202,27 @@ bool ConstraintMatchingInOutTypes(TfLiteContext* context,
   auto& ifm = context->tensors[node->inputs->data[0]];
   auto& ofm = context->tensors[node->outputs->data[0]];
   return (ifm.type == ofm.type);
+}
+
+bool ConstraintMatchingInOutQuant(TfLiteContext* context,
+                                  const TfLiteNode* node,
+                                  int32_t builtin_code) {
+  auto& in = context->tensors[node->inputs->data[0]];
+  auto& out = context->tensors[node->outputs->data[0]];
+
+  //Input and output quantisation must match
+  auto in_quant = reinterpret_cast<TfLiteAffineQuantization*>(in.quantization.params);
+  auto out_quant = reinterpret_cast<TfLiteAffineQuantization*>(out.quantization.params);
+  if (in_quant->scale->size != out_quant->scale->size)
+    return false;
+  for (int i = 0; i < in_quant->scale->size; i ++) {
+    if (in_quant->scale->data[i] != out_quant->scale->data[i])
+      return false;
+    if (in_quant->zero_point->data[i] != out_quant->zero_point->data[i])
+      return false;
+  }
+
+  return true;
 }
 
 bool ConstraintBatchSize(TfLiteContext* context,
@@ -252,6 +273,19 @@ bool ConstraintStrideRange(TfLiteContext* context,
 
   //Stride values for both width and height must be in the range {}
   return ValueInRange(param->stride_width, stride_range) &&
+         ValueInRange(param->stride_height, stride_range);
+}
+
+template <typename T>
+bool ConstraintConvStrideRange(TfLiteContext* context,
+                               const TfLiteNode* node,
+                               int32_t builtin_code) {
+  auto& op_feature = OPERATOR_MAP.at(builtin_code);
+  T* param = reinterpret_cast<T*>(node->builtin_data);
+
+  //Stride width must be greater than or equal to 1
+  //Stride height must be between 1 and 3
+  return (param->stride_width >= 1) &&
          ValueInRange(param->stride_height, stride_range);
 }
 
@@ -316,8 +350,13 @@ bool ConstraintBias(TfLiteContext* context,
 
   if (node->inputs->data[index] < 0)
     return true;
-  //Optional Bias tensor must be of type: {}
   auto& biases = context->tensors[node->inputs->data[index]];
+
+  //Optional Bias tensor must be of shape: 1D
+  if (biases.dims->size != 1)
+    return false;
+
+  //Optional Bias tensor must be of type: {}
   if (supported_bias_dtypes.count(biases.type) == 0)
     return false;
 
@@ -530,14 +569,28 @@ bool ConstraintResizebiHalfPixelCentersDims(TfLiteContext* context,
                                             int32_t builtin_code) {
   T* param = reinterpret_cast<T*>(node->builtin_data);
 
-  //Half_pixel_centers for resize bilinear requires that OFM W and H is 2x IFM W and H
-  auto& input = context->tensors[node->inputs->data[0]];
-  auto& output = context->tensors[node->outputs->data[0]];
-  auto& in_shape = input.dims->data;
-  auto& out_shape = output.dims->data;
+  auto& in = context->tensors[node->inputs->data[0]];
+  auto& out = context->tensors[node->outputs->data[0]];
+  auto& in_shape = in.dims->data;
+  auto& out_shape = out.dims->data;
   if (!param->half_pixel_centers)
     return true;
-  return (out_shape[1] / in_shape[1] == 2 && out_shape[2] / in_shape[2] == 2);
+
+  int w,h;
+  if (in.dims->size == 4){
+    h = 1;
+    w = 2;
+  } else if (in.dims->size == 3) {
+    h = 0;
+    w = 1;
+  } else {
+    return false;
+  }
+  //IFM W and H are both 1
+  if (in_shape[h] == 1 && in_shape[w] == 1)
+    return true;
+  //Half_pixel_centers for resize bilinear requires that OFM W and H is 2x IFM W and H
+  return (out_shape[h] / in_shape[h] == 2 && out_shape[w] / in_shape[w] == 2);
 }
 
 bool ConstraintMatchingQuantizationParams(TfLiteContext* context,
@@ -647,7 +700,6 @@ bool ConstraintStridedSliceValues(TfLiteContext* context,
       return false;
   }
 
-
   //All Strides values must be 1
   for (int i = 0; i < NumElements(&strides); i ++){
     if (strides_data[i] != 1)
@@ -708,27 +760,13 @@ ConstraintMeanAxisValue(TfLiteContext* context,
   return false;
 }
 
-template <typename T>
 bool ConstraintMeanProduct(TfLiteContext* context,
                            const TfLiteNode* node,
                            int32_t builtin_code) {
-  T* param = reinterpret_cast<T*>(node->builtin_data);
-
-  //Product of height and width must be no greater than {} when:
-  //IFM and OFM have different scale or zero point; or
-  //'keep_dims' is True
+  //Product of height and width must be no greater than {}
   auto& in = context->tensors[node->inputs->data[0]];
   auto& out = context->tensors[node->outputs->data[0]];
-  auto in_quant = reinterpret_cast<TfLiteAffineQuantization*>(in.quantization.params);
-  auto out_quant = reinterpret_cast<TfLiteAffineQuantization*>(out.quantization.params);
 
-  int max_prod = 0;
-  if (!param->keep_dims && in_quant->scale->data[0] == out_quant->scale->data[0] &&
-      in_quant->zero_point->data[0] == out_quant->zero_point->data[0])
-    max_prod = mean_kernel_product_avgpool;
-  else
-    max_prod = mean_kernel_product;
-  
   auto& in_shape = in.dims->data;
   int w,h;
   if (in.dims->size > 3){
@@ -738,22 +776,19 @@ bool ConstraintMeanProduct(TfLiteContext* context,
     h = in_shape[0];
     w = in_shape[1];
   }
-  return (h * w <= max_prod);
+  return (h * w <= mean_kernel_product);
 }
 
 bool ConstraintMeanHeightSingleAxis(TfLiteContext* context,
                                     const TfLiteNode* node,
                                     int32_t builtin_code) {
   //For single axis averages across the height dimension:
-  //IFM height must be no greater than {} if the IFM and OFM scale and zero point match; otherwise
-  //IFM height must be no greater than {} if the IFM and OFM scale or zero point do not match
+  //IFM height must be no greater than {}
   auto& in = context->tensors[node->inputs->data[0]];
   auto& axis = context->tensors[node->inputs->data[1]];
   auto& out = context->tensors[node->outputs->data[0]];
   auto& in_shape = in.dims->data;
   auto& axis_shape = axis.dims->data;
-  auto in_quant = reinterpret_cast<TfLiteAffineQuantization*>(in.quantization.params);
-  auto out_quant = reinterpret_cast<TfLiteAffineQuantization*>(out.quantization.params);
 
   int32_t axis_value;
   if (NumElements(&axis) == 1)  // single axis
@@ -769,14 +804,17 @@ bool ConstraintMeanHeightSingleAxis(TfLiteContext* context,
   if (axis_value != in.dims->size - 3)
     return true;
 
-  int max_height = 0;
-  if (in_quant->scale->data[0] == out_quant->scale->data[0] &&
-      in_quant->zero_point->data[0] == out_quant->zero_point->data[0]) {
-    max_height = filter_height_range[1];
-  } else {
-    max_height = dilated_height_range[1];
-  }
-  return (in_shape[axis_value] <= max_height);
+  return (in_shape[axis_value] <= dilated_height_range[1]);
+}
+
+bool ConstraintMatchingInOutElements(TfLiteContext* context,
+                                     const TfLiteNode* node,
+                                     int32_t builtin_code) {
+  auto& in = context->tensors[node->inputs->data[0]];
+  auto& out = context->tensors[node->outputs->data[0]];
+
+  //Input and output number of elements must match
+  return NumElements(&in) == NumElements(&out);
 }
 
 bool ConstraintReshapeShapeConstant(TfLiteContext* context,
@@ -901,6 +939,29 @@ bool ConstraintSplitVInferred(TfLiteContext* context,
   return (num_inferred <= 1);
 }
 
+template <typename T>
+bool ConstraintSplit(TfLiteContext* context,
+                     const TfLiteNode* node,
+                     int32_t builtin_code) {
+  T* param = reinterpret_cast<T*>(node->builtin_data);
+  auto& in = context->tensors[node->inputs->data[1]];
+  auto& in2 = context->tensors[node->inputs->data[0]];
+
+  int32_t dims = in.dims->size;
+  int32_t axis = GetTensorData<int32_t>(&in2)[0];
+  axis += axis < 0 ? dims : 0;
+
+  //Axis value must be in the range [-RANK(IFM) to +RANK(IFM))
+  if (axis < 0 || axis >= dims)
+    return false;
+
+  //Axis must be divisible by number of splits
+  if (in.dims->data[axis] % param->num_splits != 0)
+    return false;
+
+  return true;
+}
+
 bool ConstraintInput8bit(TfLiteContext* context,
                          const TfLiteNode* node,
                          int32_t builtin_code) {
@@ -911,10 +972,95 @@ bool ConstraintInput8bit(TfLiteContext* context,
   return (in.type == kTfLiteInt8 || in.type == kTfLiteUInt8);
 }
 
-//TODO
+bool ConstraintInputSigned(TfLiteContext* context,
+                           const TfLiteNode* node,
+                           int32_t builtin_code) {
+  auto& op_feature = OPERATOR_MAP.at(builtin_code);
+  auto index = op_feature.indices[TensorIndices_IFMS][0];
+  auto& in = context->tensors[node->inputs->data[index]];
+
+  return (in.type == kTfLiteInt8 || in.type == kTfLiteInt16);
+}
+
+bool ConstraintArgmax(TfLiteContext* context,
+                      const TfLiteNode* node,
+                      int32_t builtin_code) {
+  auto& in = context->tensors[node->inputs->data[0]];
+  auto& in2 = context->tensors[node->inputs->data[1]];
+  auto& out = context->tensors[node->outputs->data[0]];
+
+  int32_t inp_dims = in.dims->size;
+  int32_t axis = GetTensorData<int32_t>(&in2)[0];
+
+  //Operation must be performed along the depth axis
+  if (axis != inp_dims - 1 && axis != -1)
+    return false;
+
+  //IFM depth must be no greater than 127
+  if (in.dims->data[3] > 127)
+    return false;
+
+  //OFM must be int32 or int64
+  if (out.type != kTfLiteInt32 && out.type != kTfLiteInt64)
+    return false;
+
+  return true;
+}
+
+bool ConstraintLstm(TfLiteContext* context,
+                    const TfLiteNode* node,
+                    int32_t builtin_code) {
+  auto& in = context->tensors[node->inputs->data[0]];
+  auto& out = context->tensors[node->outputs->data[0]];
+
+  //IFM and OFM must have 3D shape
+  if (in.dims->size != 3 || out.dims->size != 3)
+    return false;
+
+  //Must have 24 input tensors
+  if (node->inputs->size != 24)
+    return false;
+
+  //Must have 5 intermediate tensors
+  if (node->intermediates->size != 5)
+    return false;
+
+  //State tensors(18,19) must be variable
+  for (int i = 18; i < 19; i ++) {
+    auto& state = context->tensors[node->inputs->data[i]];
+    if (!state.is_variable)
+      return false;
+  }
+
+  //Must not use CIFG
+  //All input and recurrent weights must be available
+  for (int i = 1; i < 9; i ++){
+    if (node->inputs->data[i] < 0)
+      return false;
+  }
+
+  //Must not use Peephole
+  for (int i = 9; i < 12; i ++){
+    if (node->inputs->data[i] >= 0)
+      return false;
+  }
+
+  //Must not use Projection
+  for (int i = 16; i < 18; i ++){
+    if (node->inputs->data[i] >= 0)
+      return false;
+  }
+
+  //Must not use Normalisation
+  for (int i = 20; i < 24; i ++){
+    if (node->inputs->data[i] >= 0)
+      return false;
+  }
+  return true;
+}
+
 std::vector<ConstraintFunc> common_constraints{ConstraintTensorPre, ConstraintTensorPost, ConstraintBatchSize};
 
-//Add Input and output quantisation must match constraint.
 const std::map<int, OperatorFeature> OPERATOR_MAP{
   { kTfLiteBuiltinConcatenation,
      { IFM_IFM2_INDICES,
@@ -938,12 +1084,12 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinExpandDims,
      { IFM_INDICES,
-       {}
+       {ConstraintMatchingInOutQuant, ConstraintMatchingInOutElements}
      }
   },
   { kTfLiteBuiltinExp,
      { IFM_INDICES,
-       {}
+       {ConstraintInputSigned}
      }
   },
   { kTfLiteBuiltinSplitV,
@@ -958,7 +1104,7 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinSqueeze,
      { IFM_INDICES,
-       {}
+       {ConstraintMatchingInOutQuant, ConstraintMatchingInOutElements}
      }
   },
   { kTfLiteBuiltinRelu,
@@ -1006,6 +1152,11 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
        {ConstraintInput8bit, ConstraintMatchingInOutTypes}
      }
   },
+  { kTfLiteBuiltinArgMax,
+     { IFM_INDICES,
+       {ConstraintInput8bit, ConstraintArgmax}
+     }
+  },
   { kTfLiteBuiltinQuantize,
      { IFM_INDICES,
        {}
@@ -1014,6 +1165,11 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   { kTfLiteBuiltinPack,
      { IFM_INDICES,
        {}
+     }
+  },
+  { kTfLiteBuiltinUnidirectionalSequenceLstm,
+     { IFM_WEIGHTS_INDICES,
+       {ConstraintInputSigned, ConstraintMatchingInOutTypes, ConstraintLstm}
      }
   },
   { kTfLiteBuiltinSoftmax,
@@ -1028,7 +1184,7 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinSplit,
      { SPLIT_IFM_INDICES,
-       {}
+       {ConstraintSplit<TfLiteSplitParams>}
      }
   },
   { kTfLiteBuiltinAdd,
@@ -1048,7 +1204,7 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinReshape,
      { IFM_INDICES,
-       {ConstraintReshapeShapeConstant}
+       {ConstraintReshapeShapeConstant, ConstraintMatchingInOutQuant, ConstraintMatchingInOutElements}
      }
   },
   { kTfLiteBuiltinMaximum,
@@ -1073,7 +1229,7 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinMean,
      { IFM_INDICES,
-       {ConstraintInput8bit, ConstraintMeanAxisValue, ConstraintMeanProduct<TfLiteReducerParams>, ConstraintMeanHeightSingleAxis}
+       {ConstraintMeanAxisValue, ConstraintMeanProduct, ConstraintMeanHeightSingleAxis}
      }
   },
   { kTfLiteBuiltinAveragePool2d,
@@ -1091,7 +1247,7 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinConv2d,
      { IFM_WEIGHTS_BIAS_INDICES,
-       {ConstraintFaf<TfLiteConvParams>, ConstraintStrideRange<TfLiteConvParams>,
+       {ConstraintFaf<TfLiteConvParams>, ConstraintConvStrideRange<TfLiteConvParams>,
         ConstraintDilatedRange<TfLiteConvParams>, ConstraintWeights, ConstraintWeightsLimit, ConstraintBias}
      }
   },

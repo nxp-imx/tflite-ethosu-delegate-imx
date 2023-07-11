@@ -397,6 +397,17 @@ void SetBuiltinOptions(OperatorT *op, int32_t op_code, void* data){
       op->builtin_options.Set(option);
       break;
     }
+    case BuiltinOperator_UNIDIRECTIONAL_SEQUENCE_LSTM: {
+      auto params = reinterpret_cast<TfLiteUnidirectionalSequenceLSTMParams*>(data);
+      auto option = UnidirectionalSequenceLSTMOptionsT();
+      option.fused_activation_function = TfLiteActivationToSchemaActivation(params->activation);
+      option.cell_clip = params->cell_clip;
+      option.proj_clip = params->proj_clip;
+      option.time_major = params->time_major;
+      option.asymmetric_quantize_inputs = params->asymmetric_quantize_inputs;
+      op->builtin_options.Set(option);
+      break;
+    }
     default: {
        throw "Can't support Operator.";
     }
