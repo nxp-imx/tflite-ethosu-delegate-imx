@@ -16,7 +16,7 @@ limitations under the License.
 #define TENSORFLOW_LITE_DELEGATES_ENUM_MAPPING_H_
 
 #include "tensorflow/lite/builtin_op_data.h"
-#include "schema_generated.h"
+#include "tensorflow/lite/schema/schema_generated.h"
 
 // TODO(aselle): Ideally extract this from the schema.
 

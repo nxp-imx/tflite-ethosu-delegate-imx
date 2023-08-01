@@ -10,11 +10,11 @@
 
 #include <Python.h>
 #include "flatbuffers/flexbuffers.h"
-#include "schema_generated.h"
 
 #include "tensorflow/lite/context_util.h"
 #include "tensorflow/lite/builtin_ops.h"
 #include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
+#include "tensorflow/lite/schema/schema_generated.h"
 
 
 namespace tflite {

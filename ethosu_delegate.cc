@@ -21,7 +21,6 @@ limitations under the License.
 #include <stdio.h>
 
 #include "flatbuffers/flexbuffers.h"
-#include "schema_generated.h"
 
 #include "ethosu_delegate.h"
 #include "simple_delegate.h"
@@ -30,6 +29,7 @@ limitations under the License.
 #include "tensorflow/lite/context_util.h"
 #include "tensorflow/lite/builtin_ops.h"
 #include "tensorflow/lite/minimal_logging.h"
+#include "tensorflow/lite/schema/schema_generated.h"
 
 using namespace std;
 
