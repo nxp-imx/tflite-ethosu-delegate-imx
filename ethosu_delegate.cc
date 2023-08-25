@@ -173,7 +173,7 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
             size_t flash_data_size = flash_tensor->bytes;
             base_addr_size[0] = static_cast<uint32_t>(flash_data_size);//flash size at first
             if (flash_data_size != 0 && ethosu_flash_buffer == nullptr) {
-                ethosu_flash_buffer = EthosU::Buffer::GetSingletonFlash(ethosu_device, flash_data_size);
+                ethosu_flash_buffer = make_shared<EthosU::Buffer>(*ethosu_device, flash_data_size);
                 memcpy(ethosu_flash_buffer->data(), flash_tensor->data.raw, flash_data_size);
             }
 
