@@ -12,7 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#include "tensorflow/lite/delegates/utils/simple_delegate.h"
+#include "simple_delegate.h"
 
 #include <limits>
 #include <memory>
@@ -48,9 +48,10 @@ TfLiteRegistration GetDelegateKernelRegistration(
     }
     auto* delegate =
         reinterpret_cast<SimpleDelegateInterface*>(params->delegate->data_);
+    void* delegate_context = delegate->GetDelegateContext();
     std::unique_ptr<SimpleDelegateKernelInterface> delegate_kernel(
         delegate->CreateDelegateKernelInterface());
-    if (delegate_kernel->Init(context, params) != kTfLiteOk) {
+    if (delegate_kernel->Init(context, params, delegate_context) != kTfLiteOk) {
       return nullptr;
     }
     return delegate_kernel.release();

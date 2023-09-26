@@ -36,6 +36,13 @@ using namespace std;
 namespace tflite {
 namespace ethosu {
 
+struct TfLiteEthosuContext{
+  EthosU::Device* device;
+  shared_ptr<EthosU::Buffer> arena_buffer;  //Input buffer for input/ouput/scratch tensor
+  shared_ptr<EthosU::Buffer> flash_buffer;  //Input buffer for weight tensor
+  shared_ptr<EthosU::Buffer> qread_buffer;  //Ouput buffer for profiling qread data
+};
+
 // Ethosu delegate kernel.
 class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
  public:
@@ -43,21 +50,9 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
       : options(opt) {}
 
   TfLiteStatus Init(TfLiteContext* context,
-                    const TfLiteDelegateParams* params) override {
-    try {
-        ethosu_device = EthosU::Device::GetSingleton(options.device_name.c_str());
-
-        if (options.enable_profiling && options.profiling_buffer_size != 0){
-            size_t size = sizeof(EthosuQreadEvent) * options.profiling_buffer_size;
-            ethosu_qread_buffer = make_shared<EthosU::Buffer>(*ethosu_device, size);
-            ethosu_qread_buffer->resize(0);
-        } else {
-            ethosu_qread_buffer = nullptr;
-        }
-    } catch (exception &e) {
-        TF_LITE_KERNEL_LOG(context, "Failed to create ethos_u driver.\n");
-        return kTfLiteDelegateError;
-    }
+                    const TfLiteDelegateParams* params,
+                    void* data) override {
+    ethosu_context = reinterpret_cast<TfLiteEthosuContext*>(data);
 
     //Check if vela compiled model
     int vela_node = 0;
@@ -152,7 +147,7 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
                              tensor_count * sizeof(uint32_t) + //Space for base_addr_size
                              tensor_count * sizeof(uint64_t);  //Space for the base_addr
 
-            op.ethosu_layout_buffer = make_shared<EthosU::Buffer>(*ethosu_device, layout_buffer_size);
+            op.ethosu_layout_buffer = make_shared<EthosU::Buffer>(*ethosu_context->device, layout_buffer_size);
             uint32_t *layout_data =reinterpret_cast<uint32_t*>(op.ethosu_layout_buffer->data());
             uint32_t *base_addr_size = layout_data + 2;
             layout_data[0] = op.inputs.size() - 4;
@@ -162,20 +157,22 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
             auto cms_tensor = &context->tensors[cms_idx];
             size_t cms_data_size = cms_tensor->bytes;
 
-            op.ethosu_net_buffer = make_shared<EthosU::Buffer>(*ethosu_device, cms_data_size);
+            op.ethosu_net_buffer = make_shared<EthosU::Buffer>(*ethosu_context->device, cms_data_size);
             op.ethosu_net_buffer->resize(cms_data_size);
             memcpy(op.ethosu_net_buffer->data(), cms_tensor->data.raw, cms_data_size);
-            op.ethosu_network = make_shared<EthosU::Network>(*ethosu_device, op.ethosu_net_buffer);
+            op.ethosu_network = make_shared<EthosU::Network>(*ethosu_context->device, op.ethosu_net_buffer);
 
             // Get flash tensor data size
             auto flash_idx = op.inputs[FLASH_TENSOR_INDEX];
             auto flash_tensor = &context->tensors[flash_idx];
             size_t flash_data_size = flash_tensor->bytes;
             base_addr_size[0] = static_cast<uint32_t>(flash_data_size);//flash size at first
-            if (flash_data_size != 0 && ethosu_flash_buffer == nullptr) {
-                ethosu_flash_buffer = EthosU::Buffer::GetSingletonFlash(ethosu_device, flash_data_size);
-                memcpy(ethosu_flash_buffer->data(), flash_tensor->data.raw, flash_data_size);
+            if (flash_data_size != 0 && ethosu_context->flash_buffer == nullptr) {
+                ethosu_context->flash_buffer =
+			make_shared<EthosU::Buffer>(*ethosu_context->device, flash_data_size);
+                memcpy(ethosu_context->flash_buffer->data(), flash_tensor->data.raw, flash_data_size);
             }
+	    op.ethosu_flash_buffer = ethosu_context->flash_buffer;
 
             // Get the arena data size
             size_t tmp_arena_size = 0;
@@ -205,7 +202,12 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
                 arena_data_size = tmp_arena_size;
         }
 
-        ethosu_arena_buffer = EthosU::Buffer::GetSingletonArena(ethosu_device, arena_data_size);
+	if (ethosu_context->arena_buffer == nullptr) {
+            ethosu_context->arena_buffer =
+		  make_shared<EthosU::Buffer>(*ethosu_context->device, arena_data_size);
+	} else if (ethosu_context->arena_buffer->size() < arena_data_size) {
+	    ethosu_context->arena_buffer->extend(*ethosu_context->device, arena_data_size);
+	}
     } catch (exception &e) {
         TF_LITE_KERNEL_LOG(context, "Failed to alloc ethos_u buffer.\n");
         return kTfLiteDelegateError;
@@ -286,7 +288,7 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
                              tensor_count * sizeof(uint32_t) + //Space for base_addr_size
                              tensor_count * sizeof(uint64_t);  //Space for the base_addr
 
-        op.ethosu_layout_buffer = make_shared<EthosU::Buffer>(*ethosu_device, layout_buffer_size);
+        op.ethosu_layout_buffer = make_shared<EthosU::Buffer>(*ethosu_context->device, layout_buffer_size);
         uint32_t *layout_data =reinterpret_cast<uint32_t*>(op.ethosu_layout_buffer->data());
         uint32_t *base_addr_size = layout_data + 2;
         layout_data[0] = ethosu_op->inputs.size() - 4;
@@ -294,16 +296,16 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
 
         // Get command stream data size and create buffer
         size_t cms_data_size = cms_buffer->data.size();
-        op.ethosu_net_buffer = make_shared<EthosU::Buffer>(*ethosu_device, cms_data_size);
+        op.ethosu_net_buffer = make_shared<EthosU::Buffer>(*ethosu_context->device, cms_data_size);
         memcpy(op.ethosu_net_buffer->data(), cms_buffer->data.data(), cms_data_size);
-        op.ethosu_network = make_shared<EthosU::Network>(*ethosu_device, op.ethosu_net_buffer);
+        op.ethosu_network = make_shared<EthosU::Network>(*ethosu_context->device, op.ethosu_net_buffer);
 
         // Get flash tensor data size
         auto flash_data_size = flash_buffer->data.size();
         base_addr_size[0] = static_cast<uint32_t>(flash_data_size);//flash size at first
-        if (flash_data_size != 0 && ethosu_flash_buffer == nullptr) {
-          ethosu_flash_buffer = make_shared<EthosU::Buffer>(*ethosu_device, flash_data_size);
-          memcpy(ethosu_flash_buffer->data(), flash_buffer->data.data(), flash_data_size);
+        if (flash_data_size != 0) {
+          op.ethosu_flash_buffer = make_shared<EthosU::Buffer>(*ethosu_context->device, flash_data_size);
+          memcpy(op.ethosu_flash_buffer->data(), flash_buffer->data.data(), flash_data_size);
         }
 
         // Get the arena data size
@@ -324,7 +326,12 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
         if (arena_data_size < tmp_arena_size)
           arena_data_size = tmp_arena_size;
 
-        ethosu_arena_buffer = EthosU::Buffer::GetSingletonArena(ethosu_device, arena_data_size);
+        if (ethosu_context->arena_buffer == nullptr) {
+            ethosu_context->arena_buffer
+                    = make_shared<EthosU::Buffer>(*ethosu_context->device, arena_data_size);
+        } else if (ethosu_context->arena_buffer->size() < arena_data_size) {
+            ethosu_context->arena_buffer->extend(*ethosu_context->device, arena_data_size);
+        }
       }
     } catch (exception &e) {
         TF_LITE_KERNEL_LOG(context, "Failed to alloc ethos_u buffer.\n");
@@ -336,7 +343,7 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
 
   TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) override {
     try {
-      char* arena_data = ethosu_arena_buffer->data();
+      char* arena_data = ethosu_context->arena_buffer->data();
       // Get addresses to input data, copy input data
       for (int i = 0; i < node->inputs->size; i ++) {
         auto tflite_idx = node->inputs->data[i];
@@ -349,14 +356,14 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
       }
 
       for (auto& op : operations) {
-        vector<shared_ptr<EthosU::Buffer>> ifm {ethosu_arena_buffer, op.ethosu_layout_buffer};
+        vector<shared_ptr<EthosU::Buffer>> ifm {ethosu_context->arena_buffer, op.ethosu_layout_buffer};
         vector<shared_ptr<EthosU::Buffer>> ofm {};
         if (options.enable_profiling) {
-          ofm.push_back(ethosu_qread_buffer);
-          ethosu_qread_buffer->resize(0);
+          ofm.push_back(ethosu_context->qread_buffer);
+          ethosu_context->qread_buffer->resize(0);
         }
-        if (ethosu_flash_buffer != nullptr)
-          ifm.push_back(ethosu_flash_buffer);
+        if (op.ethosu_flash_buffer != nullptr)
+          ifm.push_back(op.ethosu_flash_buffer);
 
         EthosU::Inference inference(op.ethosu_network, ifm.begin(), ifm.end(), ofm.begin(),
                     ofm.end(), pmu_counter_config, options.enable_cycle_counter);
@@ -379,11 +386,12 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
           cout << "Ethos-u cycle counter: " << inference.getCycleCounter() << endl;
         }
         if (options.enable_profiling) {
-          auto count = ethosu_qread_buffer->size() / sizeof(EthosuQreadEvent);
+          auto count = ethosu_context->qread_buffer->size() / sizeof(EthosuQreadEvent);
           if (count == options.profiling_buffer_size) {
             cout << "Ethos_u profiling_buffer_size is too small, please set a larger number" << endl;
           } else {
-            auto qread_buffer = reinterpret_cast<EthosuQreadEvent*>(ethosu_qread_buffer->data());
+            auto qread_buffer =
+		    reinterpret_cast<EthosuQreadEvent*>(ethosu_context->qread_buffer->data());
             cout << "Ethos_u qread profiling data." << endl;
             for (int i =0; i < count; i ++) {
                 cout << "index:" << i << ",qread:0x" << hex << qread_buffer[i].qread
@@ -409,9 +417,11 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
 
  private:
   const EthosuDelegateOptions options;
+  TfLiteEthosuContext* ethosu_context;
   struct OperationDataType {
     shared_ptr<EthosU::Buffer> ethosu_net_buffer;  //Buffer for cms tensor
     shared_ptr<EthosU::Buffer> ethosu_layout_buffer;   //Buffer for layout of in/out/scratch
+    shared_ptr<EthosU::Buffer> ethosu_flash_buffer;  //Input buffer for weight tensor
     shared_ptr<EthosU::Network> ethosu_network;
     //for vela model
     vector<int> inputs;
@@ -422,10 +432,6 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
   std::unique_ptr<ModelT> model;
   ModelConverter *model_converter;
 
-  EthosU::Device* ethosu_device;
-  shared_ptr<EthosU::Buffer> ethosu_arena_buffer;  //Input buffer for input/ouput/scratch tensor
-  shared_ptr<EthosU::Buffer> ethosu_flash_buffer;  //Input buffer for weight tensor
-  shared_ptr<EthosU::Buffer> ethosu_qread_buffer;  //Ouput buffer for profiling qread data
   vector<OperationDataType> operations;
   std::map<int, int32_t> tensor_address_map;
   vector<uint32_t> pmu_counter_config;
@@ -446,7 +452,32 @@ class EthosuDelegate : public SimpleDelegateInterface {
     return IsNodeSupportedByEthosU(context, node, registration->builtin_code);
   }
 
-  TfLiteStatus Initialize(TfLiteContext* context) override { return kTfLiteOk; }
+  TfLiteStatus Initialize(TfLiteContext* context) override {
+    try {
+        ethosu_context.device =
+		EthosU::Device::GetSingleton(options_.device_name.c_str());
+
+        if (options_.enable_profiling && options_.profiling_buffer_size != 0){
+            size_t size = sizeof(EthosuQreadEvent) * options_.profiling_buffer_size;
+            ethosu_context.qread_buffer =
+		    make_shared<EthosU::Buffer>(*ethosu_context.device, size);
+            ethosu_context.qread_buffer->resize(0);
+        } else {
+            ethosu_context.qread_buffer = nullptr;
+        }
+	ethosu_context.arena_buffer = nullptr;
+	ethosu_context.flash_buffer = nullptr;
+    } catch (exception &e) {
+        TF_LITE_KERNEL_LOG(context, "Failed to create ethos_u driver.\n");
+        return kTfLiteDelegateError;
+    }
+
+    return kTfLiteOk;
+  }
+
+  void *GetDelegateContext() const{
+      return (void*) &ethosu_context;
+  }
 
   const char* Name() const override {
     static constexpr char kName[] = "EthosuDelegate";
@@ -465,6 +496,7 @@ class EthosuDelegate : public SimpleDelegateInterface {
 
  private:
   const EthosuDelegateOptions options_;
+  TfLiteEthosuContext ethosu_context;
 };
 
 }  // namespace ethosu

@@ -248,22 +248,6 @@ size_t Buffer::size() const {
 int Buffer::getFd() const {
     return fd;
 }
-
-std::shared_ptr<Buffer> Buffer::GetSingletonFlash(Device* device, size_t size){
-    static std::shared_ptr<Buffer> flash = make_shared<Buffer>(*device, size);
-    if (flash->capacity() < size){
-	flash->extend(*device, size);
-    }
-    return flash;
-}
-
-std::shared_ptr<Buffer> Buffer::GetSingletonArena(Device* device, size_t size){
-    static std::shared_ptr<Buffer> arena = make_shared<Buffer>(*device, size);
-    if (arena->capacity() < size){
-	arena->extend(*device, size);
-    }
-    return arena;
-}
 /****************************************************************************
  * Network
  ****************************************************************************/

@@ -1,5 +1,5 @@
 /* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
-
+Copyright 2022-2023 NXP
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -47,7 +47,8 @@ class SimpleDelegateKernelInterface {
   // Initializes a delegated subgraph.
   // The nodes in the subgraph are inside TfLiteDelegateParams->nodes_to_replace
   virtual TfLiteStatus Init(TfLiteContext* context,
-                            const TfLiteDelegateParams* params) = 0;
+                            const TfLiteDelegateParams* params,
+			    void *data) = 0;
 
   // Will be called by the framework. Should handle any needed preparation
   // for the subgraph e.g. allocating buffers, compiling model.
@@ -112,6 +113,9 @@ class SimpleDelegateInterface {
   // Returns SimpleDelegateInterface::Options which has delegate properties
   // relevant for graph partitioning.
   virtual SimpleDelegateInterface::Options DelegateOptions() const = 0;
+
+  // Get the SimpleDelegate global context data
+  virtual void *GetDelegateContext() const = 0;
 };
 
 // Factory class that provides static methods to deal with SimpleDelegate
