@@ -364,7 +364,21 @@ void SetBuiltinOptions(OperatorT *op, int32_t op_code, void* data){
       op->builtin_options.Set(option);
       break;
     }
+    case BuiltinOperator_GELU: {
+      auto params = reinterpret_cast<TfLiteGeluParams*>(data);
+      auto option = GeluOptionsT();
+      option.approximate = params->approximate;
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_SQUARED_DIFFERENCE: {
+      auto option = SquaredDifferenceOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
     case BuiltinOperator_LOGISTIC:
+    case BuiltinOperator_LOG:
+    case BuiltinOperator_RSQRT:
     case BuiltinOperator_RELU:
     case BuiltinOperator_PRELU:
     case BuiltinOperator_TANH:
