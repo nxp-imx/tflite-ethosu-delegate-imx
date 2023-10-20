@@ -18,7 +18,7 @@ License File:                LICENSE
 Package Category:            Ethos-u Linux driver library
 Type of Content:             source and header file
 Description and comments:    Driver library header file and source file.
-Origin:                      ARM ethos-u-linux-driver-stack v22.08 (Apache-2.0) - https://git.mlplatform.org/ml/ethos-u/ethos-u-linux-driver-stack.git
+Origin:                      ARM ethos-u-linux-driver-stack v23.08 (Apache-2.0) - https://git.mlplatform.org/ml/ethos-u/ethos-u-linux-driver-stack.git
 File location:               ethosu_drv.cc ethosu_drv.h
 
 ----------------------------------------------------

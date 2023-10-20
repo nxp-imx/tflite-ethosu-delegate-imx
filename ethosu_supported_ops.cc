@@ -46,7 +46,10 @@ EthosuValueRange filter_range{1, 8};
 EthosuValueRange filter_height_range{1, 256};
 EthosuValueRange filter_product_range{1, 256 * 256};
 const int weights_limit = 127 * 65536;
-const int mean_kernel_product = 64 * 64;
+const int mean_reduced_axis_max_size = 64 * 64;
+const int mean_kernel_product_int8 = 1 << 24;
+const int mean_kernel_product_uint8 = 1 << 23;
+const int mean_kernel_product_int16 = 1 << 16;
 
 typedef std::set<TfLiteType> TypeList;
 const TypeList supported_dtypes{kTfLiteUInt8, kTfLiteInt8, kTfLiteInt16, kTfLiteInt32};
@@ -277,16 +280,85 @@ bool ConstraintStrideRange(TfLiteContext* context,
 }
 
 template <typename T>
-bool ConstraintConvStrideRange(TfLiteContext* context,
-                               const TfLiteNode* node,
-                               int32_t builtin_code) {
+bool ConstraintStrideWidthNoUpperLimit(TfLiteContext* context,
+                                       const TfLiteNode* node,
+                                       int32_t builtin_code) {
   auto& op_feature = OPERATOR_MAP.at(builtin_code);
   T* param = reinterpret_cast<T*>(node->builtin_data);
 
-  //Stride width must be greater than or equal to 1
-  //Stride height must be between 1 and 3
-  return (param->stride_width >= 1) &&
+  auto idx = op_feature.indices[TensorIndices_IFMS][0];
+  auto& input = context->tensors[node->inputs->data[idx]];
+  auto ifm_width = input.dims->data[2];
+
+  int32_t optimized_stride;
+  auto stride_w = param->stride_width;
+  if (stride_w > 1) {
+    auto resize_factor = param->stride_width;
+    if (ifm_width % resize_factor != 0) {
+      std::vector<int32_t> hw_supported_strides = {2, 3};
+      std::vector<int32_t> divisible_strides, divisor_strides;
+      for (auto x : hw_supported_strides) {
+        if (resize_factor % x == 0)
+          divisible_strides.push_back(x);
+      }
+
+      for (auto x : divisible_strides) {
+        if (ifm_width % (stride_w / x))
+          divisor_strides.push_back(x);
+      }
+      int32_t divisor_stride = divisible_strides.empty() ? 1 : divisible_strides[0];
+      int32_t new_resize_factor = resize_factor / divisor_stride;
+      resize_factor = resize_factor != new_resize_factor ? new_resize_factor : 1;
+    }
+
+    optimized_stride = stride_w / resize_factor;
+  } else {
+    optimized_stride = stride_w;
+  }
+
+  //Stride width must be greater than or equal to 1.
+  //For stride widths greater than 3,
+  //  the post-optimization stride needs to be less than or equal to 3.
+  //Stride height must be between 1 and 3.
+  return (param->stride_width >= 1) && optimized_stride <= 3 &&
          ValueInRange(param->stride_height, stride_range);
+}
+
+bool ConstraintConvGroupsIfmDepth(TfLiteContext* context,
+                                  const TfLiteNode* node,
+                                  int32_t builtin_code) {
+
+  auto& op_feature = OPERATOR_MAP.at(builtin_code);
+
+  auto index = op_feature.indices[TensorIndices_WEIGHTS][0];
+  auto& weight = context->tensors[node->inputs->data[index]];
+  index = op_feature.indices[TensorIndices_IFMS][0];
+  auto& ifm = context->tensors[node->inputs->data[index]];
+
+  int32_t ifm_depth = ifm.dims->data[ifm.dims->size - 1]; //nhwc
+  int32_t kernel_ic = weight.dims->data[ifm.dims->size - 1]; //hwio
+  int32_t kernel_oc = weight.dims->data[0]; //hwio
+
+  int32_t num_conv_groups = ifm_depth / kernel_ic;
+
+  //IFM depth must be a whole multiple of the filter kernel depth
+  //Number of filter kernels must be equally divisible by
+  //  the number of convolution groups
+  return (kernel_oc % num_conv_groups == 0 and ifm_depth % kernel_ic == 0);
+}
+
+template <typename T>
+bool ConstraintStrideRangeNoPadding(TfLiteContext* context,
+                           const TfLiteNode* node,
+                           int32_t builtin_code) {
+  auto& op_feature = OPERATOR_MAP.at(builtin_code);
+  T* param = reinterpret_cast<T*>(node->builtin_data);
+
+  auto stride_w = param->stride_width;
+  auto padding = param->padding;
+  auto valid = ConstraintStrideWidthNoUpperLimit<T>(context, node, builtin_code);
+
+  return valid && (padding == kTfLitePaddingValid || stride_w <= 3);
 }
 
 template <typename T>
@@ -381,15 +453,26 @@ bool ConstraintTconv(TfLiteContext* context,
   auto& op_feature = OPERATOR_MAP.at(builtin_code);
   T* param = reinterpret_cast<T*>(node->builtin_data);
 
-  //Stride values for both width and height must be 2
-  if (param->stride_width != 2 || param->stride_height != 2)
-    return false;
-
   auto idx0 = op_feature.indices[TensorIndices_IFMS][0];
   auto& input = context->tensors[node->inputs->data[idx0]];
   auto& output = context->tensors[node->outputs->data[0]];
+  auto idx1 = op_feature.indices[TensorIndices_WEIGHTS][0];
+  auto& weight = context->tensors[node->inputs->data[idx1]];
+
   auto& in_shape = input.dims->data;
   auto& out_shape = output.dims->data;
+  auto kernel_h = weight.dims->data[1];
+  auto kernel_w = weight.dims->data[2];
+
+  //Stride values for width and height must match one of the following criteria:
+  //      Stride values WxH must be 1x1 or 2x2
+  //      Stride WxH 2x1 supported if ifm height and kernel height = 1
+  auto s_w = param->stride_width;
+  auto s_h = param->stride_height;
+  if (!((s_w == 1 && s_h == 1) || (s_w == 2 && s_h == 2) ||
+      (s_w == 2 && s_h == 1 && in_shape[1] == 1 && kernel_h == 1))) {
+    return false;
+  }
 
   //SAME padding: OFM dimensions must equal IFM dimensions multiplied by stride
   if (param->padding == kTfLitePaddingSame) {
@@ -399,10 +482,6 @@ bool ConstraintTconv(TfLiteContext* context,
 
   //VALID padding: OFM dimensions must equal IFM dimensions multiplied by stride,
   //      minus difference between kernel size and stride
-  auto idx1 = op_feature.indices[TensorIndices_WEIGHTS][0];
-  auto& weight = context->tensors[node->inputs->data[idx1]];
-  auto kernel_h = weight.dims->data[1];
-  auto kernel_w = weight.dims->data[2];
   if (param->padding == kTfLitePaddingValid) {
     if (out_shape[1] != (in_shape[1] * 2 + std::max(kernel_h - 2, 0)) ||
         out_shape[2] != (in_shape[2] * 2 + std::max(kernel_w - 2, 0)))
@@ -442,7 +521,9 @@ bool ConstraintFilterRange(TfLiteContext* context,
 
   //Kernel filter values for both width and height must be in the range {}
   if (param->padding == kTfLitePaddingSame) {
-    return ValueInRange(param->filter_width, filter_range) &&
+    auto stride_w = param->stride_width;
+    return (ValueInRange(param->filter_width, filter_range) ||
+	      stride_w == param->filter_width) &&
            ValueInRange(param->filter_height, filter_range);
   }
   return true;
@@ -715,17 +796,33 @@ bool ConstraintPad(TfLiteContext* context,
   if (node->inputs->size != 2)
     return false;
   auto& pad = context->tensors[node->inputs->data[1]];
+  auto& input = context->tensors[node->inputs->data[0]];
+  auto& output = context->tensors[node->outputs->data[0]];
+
   //The padding tensor must be constant
   if (pad.allocation_type != kTfLiteMmapRo || pad.data.data == nullptr)
     return false;
   //Pad tensor must be of type: {}
-  //The padding tensor must have the shape [3,2] or [4,2]
   if (supported_pad_dtypes.count(pad.type) == 0)
     return false;
+
+  //The padding tensor must have the shape [3,2] or [4,2]
   if (pad.dims->size != 2)
     return false;
-  return ((pad.dims->data[0] == 3 && pad.dims->data[1] == 2) ||
-          (pad.dims->data[0] == 4 && pad.dims->data[1] == 2));
+  if ((pad.dims->data[0] != 3 && pad.dims->data[0] != 4) || pad.dims->data[1] != 2)
+    return false;
+
+  //Shape of output tensor must equal to size of input tensor plus padding
+  const int32_t* paddings_data = GetTensorData<int32_t>(&pad);
+  for (int i = 0; i < pad.dims->data[0]; i ++){
+    int32_t before = *paddings_data++;
+    int32_t after = *paddings_data++;
+    auto expected = input.dims->data[i] + before + after;
+    if (output.dims->data[i] != expected)
+        return false;
+  }
+
+  return true;
 }
 
 bool
@@ -737,74 +834,108 @@ ConstraintMeanAxisValue(TfLiteContext* context,
 
   auto axis_data = GetTensorData<int32_t>(&axis); 
   auto num_axis = NumElements(&axis);
-  //Axis indices must correspond to height and width axes
-  if (in.dims->size == 2 || in.dims->size == 3) {
-    if (num_axis == 1) {
-      if (axis_data[0] == 0 || axis_data[0] == 1)
-        return true;
-    } else if (num_axis == 2) {
-      if ((axis_data[0] == 0 && axis_data[1] == 1) || (axis_data[0] == 1 && axis_data[1] == 0))
-        return true;
+  auto shape = in.dims->data;
+  //Requirements for axis parameter:
+  //    When IFM tensor is 2D:
+  //        - Reduction in both axes is supported.
+  //    When IFM tensor is 3D or 4D:
+  //        - Reduction in Batch axis is only supported if batch size is 1.
+  //        - Reduction in both Height and Width axes is supported.
+  //        - Reduction in Depth axis is supported if at least one of H,W,C are of size 1.
+
+  for (int i = 0; i < num_axis; i ++){
+    auto ax = axis_data[i];
+    if (ax < 0 || ax >= in.dims->size) {
+      return false;
     }
-  } else if (in.dims->size == 4){
-    if (num_axis == 1) {
-      if (axis_data[0] == 1 || axis_data[0] == 2)
-        return true;
-    } else if (num_axis == 2) {
-      if ((axis_data[0] == 1 && axis_data[1] == 2) || (axis_data[0] == 2 && axis_data[1] == 1))
-        return true;
+
+    if (in.dims->size == 4) {
+      // Batch is only supported if batch shape is 1
+      if (ax == 0 && shape[0] != 1) {
+        return false;
+      }
+
+      // Depth is supported if any of h,w,c == 1
+      if (ax == 3 && (shape[1] != 1 && shape[2] != 1 && shape[3] != 1)) {
+        return false;
+      }
     }
-  } else {
-    return false;
+
+    if (in.dims->size == 3) {
+      // Depth is supported if any of h,w,c == 1
+      if (ax == 2 && (shape[0] != 1 && shape[1] != 1 && shape[2] != 1)) {
+        return false;
+      }
+    }
   }
-  return false;
+  return true;
 }
 
 bool ConstraintMeanProduct(TfLiteContext* context,
                            const TfLiteNode* node,
                            int32_t builtin_code) {
-  //Product of height and width must be no greater than {}
-  auto& in = context->tensors[node->inputs->data[0]];
-  auto& out = context->tensors[node->outputs->data[0]];
-
-  auto& in_shape = in.dims->data;
-  int w,h;
-  if (in.dims->size > 3){
-    h = in_shape[1];
-    w = in_shape[2];
-  } else {
-    h = in_shape[0];
-    w = in_shape[1];
-  }
-  return (h * w <= mean_kernel_product);
-}
-
-bool ConstraintMeanHeightSingleAxis(TfLiteContext* context,
-                                    const TfLiteNode* node,
-                                    int32_t builtin_code) {
-  //For single axis averages across the height dimension:
-  //IFM height must be no greater than {}
+  //Product of reduced axes must be no greater than:
+  //      - {} for signed 8-bit inputs.
+  //      - {} for unsigned 8-bit inputs.
+  //      - {} for signed 16-bit inputs.
   auto& in = context->tensors[node->inputs->data[0]];
   auto& axis = context->tensors[node->inputs->data[1]];
-  auto& out = context->tensors[node->outputs->data[0]];
-  auto& in_shape = in.dims->data;
-  auto& axis_shape = axis.dims->data;
+  auto axis_data = GetTensorData<int32_t>(&axis);
+  auto num_axis = NumElements(&axis);
 
-  int32_t axis_value;
-  if (NumElements(&axis) == 1)  // single axis
-    axis_value = GetTensorData<int32_t>(&axis)[0];
-  else
-    return true;
+  int prod = 1;
+  for (int i = 0; i < num_axis; i ++){
+    auto ax = axis_data[i];
+    prod = prod * in.dims->data[ax];
+  }
 
-  //No height dimension present in IFM
-  if (in.dims->size < 3)
-    return true;
+  int max_prod;
+  if (in.type == kTfLiteInt16) {
+    max_prod = mean_kernel_product_int16;
+  } else if (in.type == kTfLiteUInt8) {
+    max_prod = mean_kernel_product_uint8;
+  } else {
+    max_prod = mean_kernel_product_int8;
+  }
 
-  //Not averaging across the height dimension
-  if (axis_value != in.dims->size - 3)
-    return true;
+  return (prod <= max_prod);
+}
 
-  return (in_shape[axis_value] <= dilated_height_range[1]);
+bool ConstraintMeanDepth(TfLiteContext* context,
+                         const TfLiteNode* node,
+                         int32_t builtin_code) {
+  //If Depth axis is reduced its shape must be no greater than {}.
+  auto& in = context->tensors[node->inputs->data[0]];
+  auto& axis = context->tensors[node->inputs->data[1]];
+
+  auto axis_data = GetTensorData<int32_t>(&axis);
+  auto num_axis = NumElements(&axis);
+  auto max_depth = mean_reduced_axis_max_size;
+
+  auto depth_idx = in.dims->size - 1;
+  for (int i = 0; i < num_axis; i ++){
+    auto ax = axis_data[i];
+    if (depth_idx == ax && in.dims->data[depth_idx] > max_depth){
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool ConstraintMeanWidth(TfLiteContext* context,
+                         const TfLiteNode* node,
+                         int32_t builtin_code) {
+  //If Width axis is reduced its shape must be no greater than {}.
+  auto& in = context->tensors[node->inputs->data[0]];
+
+  int w;
+  if (in.dims->size < 4) {
+    w = in.dims->data[1];
+  } else {
+    w = in.dims->data[2];
+  }
+  return w <= mean_reduced_axis_max_size;
 }
 
 bool ConstraintMatchingInOutElements(TfLiteContext* context,
@@ -972,6 +1103,16 @@ bool ConstraintInput8bit(TfLiteContext* context,
   return (in.type == kTfLiteInt8 || in.type == kTfLiteUInt8);
 }
 
+bool ConstraintInputInt8(TfLiteContext* context,
+                         const TfLiteNode* node,
+                         int32_t builtin_code) {
+  auto& op_feature = OPERATOR_MAP.at(builtin_code);
+  auto index = op_feature.indices[TensorIndices_IFMS][0];
+  auto& in = context->tensors[node->inputs->data[index]];
+
+  return (in.type == kTfLiteInt8);
+}
+
 bool ConstraintInputSigned(TfLiteContext* context,
                            const TfLiteNode* node,
                            int32_t builtin_code) {
@@ -1059,6 +1200,32 @@ bool ConstraintLstm(TfLiteContext* context,
   return true;
 }
 
+bool ConstraintLstmWeightDimensions(TfLiteContext* context,
+                                    const TfLiteNode* node,
+                                    int32_t builtin_code) {
+  //All recurrent weights must be 2D
+  for (int i = 5; i < 9; i ++){
+    auto& weight = context->tensors[node->outputs->data[i]];
+    if (weight.dims->size != 2)
+      return false;
+  }
+  return true;
+}
+
+bool ConstraintSliceInputsConst(TfLiteContext* context,
+                                const TfLiteNode* node,
+                                int32_t builtin_code) {
+  //Begin and Size Input tensors must be constant
+  auto& begin = context->tensors[node->inputs->data[1]];
+  auto& sizes = context->tensors[node->inputs->data[2]];
+
+  if (begin.allocation_type != kTfLiteMmapRo || begin.data.data == nullptr)
+    return false;
+  if (sizes.allocation_type != kTfLiteMmapRo || sizes.data.data == nullptr)
+    return false;
+  return true;
+}
+
 std::vector<ConstraintFunc> common_constraints{ConstraintTensorPre, ConstraintTensorPost, ConstraintBatchSize};
 
 const std::map<int, OperatorFeature> OPERATOR_MAP{
@@ -1122,6 +1289,11 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
        {}
      }
   },
+  { kTfLiteBuiltinRsqrt,
+     { IFM_INDICES,
+       {ConstraintInputInt8}
+     }
+  },
   { kTfLiteBuiltinReluN1To1,
      { IFM_INDICES,
        {}
@@ -1139,10 +1311,15 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinSlice,
      { IFM_INDICES,
-       {}
+       {ConstraintSliceInputsConst}
      }
   },
   { kTfLiteBuiltinLogistic,
+     { IFM_INDICES,
+       {}
+     }
+  },
+  { kTfLiteBuiltinLog,
      { IFM_INDICES,
        {}
      }
@@ -1169,7 +1346,7 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinUnidirectionalSequenceLstm,
      { IFM_WEIGHTS_INDICES,
-       {ConstraintInputSigned, ConstraintMatchingInOutTypes, ConstraintLstm}
+       {ConstraintInputSigned, ConstraintMatchingInOutTypes, ConstraintLstm, ConstraintLstmWeightDimensions}
      }
   },
   { kTfLiteBuiltinSoftmax,
@@ -1222,6 +1399,11 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
        {ConstraintPad}
      }
   },
+  { kTfLiteBuiltinSquaredDifference,
+     { IFM_IFM2_INDICES,
+       {}
+     }
+  },
   { kTfLiteBuiltinStridedSlice,
      { IFM_INDICES,
        {ConstraintStridedSliceValues<TfLiteStridedSliceParams>}
@@ -1229,12 +1411,12 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinMean,
      { IFM_INDICES,
-       {ConstraintMeanAxisValue, ConstraintMeanProduct, ConstraintMeanHeightSingleAxis}
+       {ConstraintMeanAxisValue, ConstraintMeanProduct, ConstraintMeanWidth, ConstraintMeanDepth}
      }
   },
   { kTfLiteBuiltinAveragePool2d,
      { IFM_INDICES,
-       {ConstraintMatchingInOutTypes, ConstraintFaf<TfLitePoolParams>, ConstraintStrideRange<TfLitePoolParams>,
+       {ConstraintMatchingInOutTypes, ConstraintFaf<TfLitePoolParams>, ConstraintStrideRangeNoPadding<TfLitePoolParams>,
         ConstraintFilterRange<TfLitePoolParams>, ConstraintFilterHeightRangeValidPad<TfLitePoolParams>,
         ConstraintFilterProductRangeValidPad<TfLitePoolParams>}
      }
@@ -1247,8 +1429,9 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinConv2d,
      { IFM_WEIGHTS_BIAS_INDICES,
-       {ConstraintFaf<TfLiteConvParams>, ConstraintConvStrideRange<TfLiteConvParams>,
-        ConstraintDilatedRange<TfLiteConvParams>, ConstraintWeights, ConstraintWeightsLimit, ConstraintBias}
+       {ConstraintFaf<TfLiteConvParams>, ConstraintStrideWidthNoUpperLimit<TfLiteConvParams>,
+        ConstraintDilatedRange<TfLiteConvParams>, ConstraintWeights, ConstraintWeightsLimit, ConstraintBias,
+        ConstraintConvGroupsIfmDepth}
      }
   },
   { kTfLiteBuiltinDepthwiseConv2d,
@@ -1296,8 +1479,9 @@ bool IsNodeSupportedByEthosU(TfLiteContext* context,
 
   auto& op_feature = OPERATOR_MAP.at(builtin_code);
   for (auto constraint_func : op_feature.constraints) {
-    if (constraint_func(context, node, builtin_code) == false)
+    if (constraint_func(context, node, builtin_code) == false) {
       return false;
+    }
   }
   return true;
 }
