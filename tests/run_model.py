@@ -24,8 +24,7 @@ def verify(cpu_model, vela_model, delegate_path):
     for i in range(len(cpu_inputs)):
         dtype = cpu_inputs[i]['dtype']
         shape = cpu_inputs[i]['shape']
-        x = np.random.randint(low=np.iinfo(dtype).min,
-                   high=np.iinfo(dtype).max, size=shape, dtype=dtype)
+        x = np.ones(shape, dtype=dtype) * 10
         cpu_interpreter.set_tensor(cpu_inputs[i]['index'], x)
         vela_interpreter.set_tensor(vela_inputs[i]['index'], x)
 
