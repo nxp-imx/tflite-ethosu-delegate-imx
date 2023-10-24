@@ -267,6 +267,30 @@ bool ConstraintFaf(TfLiteContext* context,
   return true;
 }
 
+bool NeedFixedStrideAndPadding(TfLiteContext* context,
+                              const TfLiteNode* node,
+                              int32_t builtin_code) {
+  auto& op_feature = OPERATOR_MAP.at(builtin_code);
+  auto idx = op_feature.indices[TensorIndices_IFMS][0];
+  auto& input = context->tensors[node->inputs->data[idx]];
+
+  if (builtin_code == kTfLiteBuiltinAveragePool2d ||
+      builtin_code == kTfLiteBuiltinMaxPool2d) {
+    auto params = reinterpret_cast<TfLitePoolParams*>(node->builtin_data);
+    auto ifm_h = input.dims->data[1];
+    auto ifm_w = input.dims->data[2];
+    //Fixup Pool strides when the kernel size, IFM shape and stride are equal.
+    //Then stride can be changed to (1, 1) and padding can be changed to VALID
+    //so the strides are within the limits for the NPU.
+    if (ifm_w == params->filter_width && ifm_w == params->stride_width &&
+        ifm_h == params->filter_height && ifm_h == params->stride_height) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 template <typename T>
 bool ConstraintStrideRange(TfLiteContext* context,
                            const TfLiteNode* node,
@@ -274,9 +298,15 @@ bool ConstraintStrideRange(TfLiteContext* context,
   auto& op_feature = OPERATOR_MAP.at(builtin_code);
   T* param = reinterpret_cast<T*>(node->builtin_data);
 
+  std::vector<int32_t> strides(2);
+  if (NeedFixedStrideAndPadding(context, node, builtin_code)){
+    strides = {1, 1};
+  } else {
+    strides = {param->stride_width, param->stride_height};
+  }
   //Stride values for both width and height must be in the range {}
-  return ValueInRange(param->stride_width, stride_range) &&
-         ValueInRange(param->stride_height, stride_range);
+  return ValueInRange(strides[0], stride_range) &&
+         ValueInRange(strides[1], stride_range);
 }
 
 template <typename T>
@@ -291,9 +321,14 @@ bool ConstraintStrideWidthNoUpperLimit(TfLiteContext* context,
   auto ifm_width = input.dims->data[2];
 
   int32_t optimized_stride;
-  auto stride_w = param->stride_width;
-  if (stride_w > 1) {
-    auto resize_factor = param->stride_width;
+  std::vector<int32_t> strides(2);
+  if (NeedFixedStrideAndPadding(context, node, builtin_code)){
+    strides = {1, 1};
+  } else {
+    strides = {param->stride_width, param->stride_height};
+  }
+  if (strides[0] > 1) {
+    auto resize_factor = strides[0];
     if (ifm_width % resize_factor != 0) {
       std::vector<int32_t> hw_supported_strides = {2, 3};
       std::vector<int32_t> divisible_strides, divisor_strides;
@@ -303,7 +338,7 @@ bool ConstraintStrideWidthNoUpperLimit(TfLiteContext* context,
       }
 
       for (auto x : divisible_strides) {
-        if (ifm_width % (stride_w / x))
+        if (ifm_width % (strides[0] / x))
           divisor_strides.push_back(x);
       }
       int32_t divisor_stride = divisible_strides.empty() ? 1 : divisible_strides[0];
@@ -311,17 +346,17 @@ bool ConstraintStrideWidthNoUpperLimit(TfLiteContext* context,
       resize_factor = resize_factor != new_resize_factor ? new_resize_factor : 1;
     }
 
-    optimized_stride = stride_w / resize_factor;
+    optimized_stride = strides[0] / resize_factor;
   } else {
-    optimized_stride = stride_w;
+    optimized_stride = strides[0];
   }
 
   //Stride width must be greater than or equal to 1.
   //For stride widths greater than 3,
   //  the post-optimization stride needs to be less than or equal to 3.
   //Stride height must be between 1 and 3.
-  return (param->stride_width >= 1) && optimized_stride <= 3 &&
-         ValueInRange(param->stride_height, stride_range);
+  return (strides[0] >= 1) && optimized_stride <= 3 &&
+         ValueInRange(strides[1], stride_range);
 }
 
 bool ConstraintConvGroupsIfmDepth(TfLiteContext* context,
@@ -354,11 +389,18 @@ bool ConstraintStrideRangeNoPadding(TfLiteContext* context,
   auto& op_feature = OPERATOR_MAP.at(builtin_code);
   T* param = reinterpret_cast<T*>(node->builtin_data);
 
-  auto stride_w = param->stride_width;
-  auto padding = param->padding;
+  TfLitePadding padding;
+  std::vector<int32_t> strides(2);
+  if (NeedFixedStrideAndPadding(context, node, builtin_code)){
+    strides = {1, 1};
+    padding = kTfLitePaddingValid;
+  } else {
+    strides = {param->stride_width, param->stride_height};
+    padding = param->padding;
+  }
   auto valid = ConstraintStrideWidthNoUpperLimit<T>(context, node, builtin_code);
 
-  return valid && (padding == kTfLitePaddingValid || stride_w <= 3);
+  return valid && (padding == kTfLitePaddingValid || strides[0] <= 3);
 }
 
 template <typename T>
@@ -514,18 +556,31 @@ bool ConstraintDepthMultiplier(TfLiteContext* context,
 }
 
 template <typename T>
-bool ConstraintFilterRange(TfLiteContext* context,
-                           const TfLiteNode* node,
-                           int32_t builtin_code) {
+bool ConstraintFilterRangeValidPad(TfLiteContext* context,
+                                   const TfLiteNode* node,
+                                   int32_t builtin_code) {
   T* param = reinterpret_cast<T*>(node->builtin_data);
 
-  //Kernel filter values for both width and height must be in the range {}
-  if (param->padding == kTfLitePaddingSame) {
+  TfLitePadding padding;
+  if (NeedFixedStrideAndPadding(context, node, builtin_code)) {
+    padding = kTfLitePaddingValid;
+  } else {
+    padding = param->padding;
+  }
+  if (padding == kTfLitePaddingSame) {
     auto stride_w = param->stride_width;
+    //Kernel filter values for both width and height must be in the range {}
     return (ValueInRange(param->filter_width, filter_range) ||
 	      stride_w == param->filter_width) &&
            ValueInRange(param->filter_height, filter_range);
+  } else if (padding == kTfLitePaddingValid) {
+    //Kernel filter height must be in the range {}
+    //Product of kernel filter width and height must be in the range{}
+    auto product = param->filter_height * param->filter_width;
+    return (ValueInRange(product, filter_product_range) &&
+	    ValueInRange(param->filter_height, filter_height_range));
   }
+
   return true;
 }
 
@@ -548,33 +603,6 @@ bool ConstraintFilterProductRange(TfLiteContext* context,
   //Product of kernel filter width and height must be in the range{}
   auto product = param->filter_height * param->filter_width;
   return ValueInRange(product, filter_product_range);
-}
-
-template <typename T>
-bool ConstraintFilterHeightRangeValidPad(TfLiteContext* context,
-                                         const TfLiteNode* node,
-                                         int32_t builtin_code) {
-  T* param = reinterpret_cast<T*>(node->builtin_data);
-
-  //Kernel filter height must be in the range {}
-  if (param->padding == kTfLitePaddingValid) {
-    return ValueInRange(param->filter_height, filter_height_range);
-  }
-  return true;
-}
-
-template <typename T>
-bool ConstraintFilterProductRangeValidPad(TfLiteContext* context,
-                                  const TfLiteNode* node,
-                                  int32_t builtin_code) {
-  T* param = reinterpret_cast<T*>(node->builtin_data);
-
-  //Product of kernel filter width and height must be in the range{}
-  auto product = param->filter_height * param->filter_width;
-  if (param->padding == kTfLitePaddingValid) {
-    return ValueInRange(product, filter_product_range);
-  }
-  return true;
 }
 
 template <typename T>
@@ -964,9 +992,9 @@ bool ConstraintConcatAxis(TfLiteContext* context,
 
   auto& output = context->tensors[node->outputs->data[0]];
   int out_dims = output.dims->size;
-  int axis = param->axis > 0 ? param->axis : param->axis + out_dims;
+  int axis = param->axis >= 0 ? param->axis : param->axis + out_dims;
   //Axis attribute must be in the range [0, <out_dims>)
-  if (!(0 <= axis < out_dims))
+  if (!(axis >=0 && axis < out_dims))
     return false;
   int sum_ifm_axis = 0;
   for (int i = 0; i < node->inputs->size; i ++){
@@ -1417,8 +1445,7 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   { kTfLiteBuiltinAveragePool2d,
      { IFM_INDICES,
        {ConstraintMatchingInOutTypes, ConstraintFaf<TfLitePoolParams>, ConstraintStrideRangeNoPadding<TfLitePoolParams>,
-        ConstraintFilterRange<TfLitePoolParams>, ConstraintFilterHeightRangeValidPad<TfLitePoolParams>,
-        ConstraintFilterProductRangeValidPad<TfLitePoolParams>}
+        ConstraintFilterRangeValidPad<TfLitePoolParams>}
      }
   },
   { kTfLiteBuiltinMaxPool2d,
@@ -1450,7 +1477,7 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   { kTfLiteBuiltinFullyConnected,
      { IFM_WEIGHTS_BIAS_INDICES,
        {ConstraintFaf<TfLiteFullyConnectedParams>, ConstraintFullyConnected<TfLiteFullyConnectedParams>,
-        ConstraintDilatedRange<TfLiteFullyConnectedParams>, ConstraintWeights, ConstraintBias}
+        ConstraintWeights, ConstraintBias}
      }
   },
   { kTfLiteBuiltinResizeBilinear,
