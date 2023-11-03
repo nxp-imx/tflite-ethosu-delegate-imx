@@ -1166,7 +1166,7 @@ bool ConstraintArgmax(TfLiteContext* context,
     return false;
 
   //IFM depth must be no greater than 127
-  if (in.dims->data[3] > 127)
+  if (in.dims->data[inp_dims - 1] > 127)
     return false;
 
   //OFM must be int32 or int64
