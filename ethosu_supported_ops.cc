@@ -781,6 +781,10 @@ bool ConstraintStridedSliceValues(TfLiteContext* context,
   if (strides.allocation_type != kTfLiteMmapRo || strides.data.data == nullptr)
     return false;
 
+  //Offset attribute must be False
+  if (param->offset != false)
+    return false;
+
   //ellipsis_mask must be 0
   if (param->ellipsis_mask != 0)
     return false;

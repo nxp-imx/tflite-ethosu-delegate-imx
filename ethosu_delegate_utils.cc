@@ -246,6 +246,7 @@ void SetBuiltinOptions(OperatorT *op, int32_t op_code, void* data){
       option.ellipsis_mask = params->ellipsis_mask;
       option.new_axis_mask = params->new_axis_mask;
       option.shrink_axis_mask = params->shrink_axis_mask;
+      option.offset = params->offset;
       op->builtin_options.Set(option);
       break;
     }
