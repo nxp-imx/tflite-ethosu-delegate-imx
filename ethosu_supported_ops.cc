@@ -318,7 +318,10 @@ bool ConstraintStrideWidthNoUpperLimit(TfLiteContext* context,
 
   auto idx = op_feature.indices[TensorIndices_IFMS][0];
   auto& input = context->tensors[node->inputs->data[idx]];
+  auto& output = context->tensors[node->outputs->data[0]];
   auto ifm_width = input.dims->data[2];
+  auto ofm_width = input.dims->data[2];
+  auto ofm_height = input.dims->data[1];
 
   int32_t optimized_stride;
   std::vector<int32_t> strides(2);
@@ -351,12 +354,14 @@ bool ConstraintStrideWidthNoUpperLimit(TfLiteContext* context,
     optimized_stride = strides[0];
   }
 
-  //Stride width must be greater than or equal to 1.
-  //For stride widths greater than 3,
-  //  the post-optimization stride needs to be less than or equal to 3.
-  //Stride height must be between 1 and 3.
-  return (strides[0] >= 1) && optimized_stride <= 3 &&
-         ValueInRange(strides[1], stride_range);
+  //Strides must fulfil the following criteria:
+  //Stride h must be between 1 and 3 when ofm height is greater than 1
+  //Stride w must be between 1 and 3 when ofm height is greater than 1 or
+  //stride w must be divisible by 2 or 3 and ifm width must be divisible
+  //  by stride_w/2 or stride_w/3
+  bool h_valid = ((ofm_height == 1) || ValueInRange(strides[1], stride_range));
+  bool w_valid = ((ofm_width == 1) || (strides[0] >= 1 && optimized_stride <= 3));
+  return (h_valid && w_valid);
 }
 
 bool ConstraintConvGroupsIfmDepth(TfLiteContext* context,
