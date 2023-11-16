@@ -233,6 +233,11 @@ void SetBuiltinOptions(OperatorT *op, int32_t op_code, void* data){
       op->builtin_options.Set(option);
       break;
     }
+    case BuiltinOperator_TRANSPOSE: {
+      auto option = TransposeOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
     case BuiltinOperator_EXP: {
       auto option = ExpOptionsT();
       op->builtin_options.Set(option);

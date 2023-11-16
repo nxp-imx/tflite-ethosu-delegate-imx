@@ -86,13 +86,13 @@ extern const std::map<int, OperatorFeature> OPERATOR_MAP;
 
 typedef std::set<int32_t> BuiltinOperatorList;
 const BuiltinOperatorList shapeless_output_ops{kTfLiteBuiltinQuantize};
-const BuiltinOperatorList no_quant_ops{kTfLiteBuiltinShape, kTfLiteBuiltinArgMax};
+const BuiltinOperatorList no_quant_ops{kTfLiteBuiltinShape, kTfLiteBuiltinArgMax, kTfLiteBuiltinTranspose};
 const BuiltinOperatorList shapeless_input_ops{kTfLiteBuiltinQuantize, kTfLiteBuiltinSplit, kTfLiteBuiltinSplitV, kTfLiteBuiltinMean,
                                               kTfLiteBuiltinExpandDims, kTfLiteBuiltinMaximum, kTfLiteBuiltinMinimum, kTfLiteBuiltinAdd,
                                               kTfLiteBuiltinMul, kTfLiteBuiltinSub, kTfLiteBuiltinArgMax};
 const BuiltinOperatorList convolution_like_ops{kTfLiteBuiltinConv2d, kTfLiteBuiltinDepthwiseConv2d, kTfLiteBuiltinTransposeConv};
 const BuiltinOperatorList supported_int32_tensor_ops{kTfLiteBuiltinAdd, kTfLiteBuiltinMul, kTfLiteBuiltinSub, kTfLiteBuiltinShape,
-                                                     kTfLiteBuiltinArgMax};
+                                                     kTfLiteBuiltinArgMax, kTfLiteBuiltinTranspose};
 const BuiltinOperatorList multiple_batch_ops{kTfLiteBuiltinSplitV, kTfLiteBuiltinShape, kTfLiteBuiltinSqueeze, kTfLiteBuiltinSlice,
                                              kTfLiteBuiltinSoftmax, kTfLiteBuiltinUnpack, kTfLiteBuiltinSplit, kTfLiteBuiltinReshape,
                                              kTfLiteBuiltinStridedSlice, kTfLiteBuiltinFullyConnected};
@@ -1262,6 +1262,55 @@ bool ConstraintSliceInputsConst(TfLiteContext* context,
     return false;
   return true;
 }
+bool ConstraintTranspose(TfLiteContext* context,
+                         const TfLiteNode* node,
+                         int32_t builtin_code) {
+  auto& ifm = context->tensors[node->inputs->data[0]];
+  auto& perm = context->tensors[node->inputs->data[1]];
+  auto dims = ifm.dims->size;
+
+  //Permutation array must be a 1D tensor with RANK(IFM) elements
+  if (perm.dims->size != 1 || perm.dims->data[0] != dims)
+    return false;
+
+  //Permutation array must have constant values in the range [0, RANK(IFM))
+  if (perm.allocation_type != kTfLiteMmapRo || perm.data.data == nullptr)
+    return false;
+
+  auto values = GetTensorData<int32_t>(&perm);
+  for (int i = 0; i < dims; i ++) {
+    if (values[i] < 0 || values[i] >= dims)
+      return false;
+  }
+
+  //The following shape/permutations are supported for transpose:
+  // -When ifm rank is 2: WxC -> CxW
+  // -When ifm rank is 3: HxWxC -> WxHxC, 1xWxC -> 1xCxW, Hx1xC -> Cx1xH
+  // -When ifm rank is 4: 1xHxWxC -> 1xWxHxC, 1x1xWxC -> 1x1xCxW, 1xHx1xC -> 1xCx1xW
+
+  // WxC -> CxW
+  bool valid = (dims == 2);
+  // HxWxC -> WxHxC
+  if (!valid && dims == 3)
+    valid = (values[0] == 1 && values[1] == 1);
+  // 1xWxC -> 1xCxW
+  if (!valid && dims == 3 && ifm.dims->data[0] == 1)
+    valid = (values[1] == 2 && values[2] == 1);
+  // Hx1xC -> Cx1xH
+  if (!valid && dims == 3 && ifm.dims->data[1] == 1)
+    valid = (values[0] == 2 && values[2] == 0);
+  // 1xHxWxC -> 1xWxHxC
+  if (!valid && dims == 4)
+    valid = (values[0] == 0 && values[1] == 2 && values[2] == 1);
+  // 1x1xWxC -> 1x1xCxW
+  if (!valid && dims == 4 && ifm.dims->data[1] == 1)
+    valid = (values[0] == 0 && values[2] == 3 && values[3] == 2);
+  // 1xHx1xC -> 1xCx1xH
+  if (!valid && dims == 4 && ifm.dims->data[2] == 1)
+    valid = (values[0] == 0 && values[1] == 3 && values[3] == 1);
+
+  return valid;
+}
 
 std::vector<ConstraintFunc> common_constraints{ConstraintTensorPre, ConstraintTensorPost, ConstraintBatchSize};
 
@@ -1498,6 +1547,11 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   { kTfLiteBuiltinResizeNearestNeighbor,
      { IFM_INDICES,
        {ConstraintResize<TfLiteResizeNearestNeighborParams>, ConstraintResizeSize, ConstraintResizeAttrs<TfLiteResizeNearestNeighborParams>}
+     }
+  },
+  { kTfLiteBuiltinTranspose,
+     { IFM_IFM2_INDICES,
+       {ConstraintTranspose}
      }
   },
 };
