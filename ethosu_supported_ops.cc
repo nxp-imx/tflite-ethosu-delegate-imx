@@ -1502,8 +1502,8 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
   },
   { kTfLiteBuiltinAveragePool2d,
      { IFM_INDICES,
-       {ConstraintMatchingInOutTypes, ConstraintFaf<TfLitePoolParams>, ConstraintStrideRangeNoPadding<TfLitePoolParams>,
-        ConstraintFilterRangeValidPad<TfLitePoolParams>}
+       {ConstraintMatchingInOutTypes, ConstraintFaf<TfLitePoolParams>, ConstraintStrideWidthNoUpperLimit<TfLiteConvParams>,
+        ConstraintStrideRangeNoPadding<TfLitePoolParams>, ConstraintFilterRangeValidPad<TfLitePoolParams>}
      }
   },
   { kTfLiteBuiltinMaxPool2d,
