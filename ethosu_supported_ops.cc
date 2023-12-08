@@ -1360,6 +1360,11 @@ const std::map<int, OperatorFeature> OPERATOR_MAP{
        {ConstraintMatchingInOutQuant, ConstraintMatchingInOutElements}
      }
   },
+  { kTfLiteBuiltinGelu,
+     { IFM_INDICES,
+       {}
+     }
+  },
   { kTfLiteBuiltinRelu,
      { IFM_INDICES,
        {}
