@@ -352,6 +352,8 @@ class EthosuDelegateKernel : public SimpleDelegateKernelInterface {
             continue;
 
         int32_t data_offset = tensor_address_map[tflite_idx];
+	if (data_offset == -1)
+            continue;
         memcpy(arena_data + data_offset, tensor->data.raw, tensor->bytes);
       }
 
